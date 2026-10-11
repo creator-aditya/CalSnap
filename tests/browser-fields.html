@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!--
+        Reads back what the real application put in its own form, so the values can
+        be checked from a scripted browser run. Test fixture, not part of the app.
+    -->
+    <title>CalSnap field readout</title>
+</head>
+<body>
+    <section id="input-section"><textarea id="raw-text"></textarea>
+        <button id="btn-extract"><span id="btn-text"></span></button>
+        <p id="extraction-notice" class="notice hidden"></p>
+    </section>
+    <section id="review-section" class="hidden">
+        <button id="btn-back"></button>
+        <p id="extraction-hint" class="notice hidden"></p>
+        <form id="event-form">
+            <input id="event-title"><input id="event-date"><input id="event-start">
+            <input id="event-end"><input id="event-location"><textarea id="event-desc"></textarea>
+            <select id="event-reminder"><option value="none">none</option></select>
+        </form>
+        <button id="btn-google"></button><button id="btn-ics"></button><button id="btn-share"></button>
+    </section>
+    <div id="status" class="status hidden"></div>
+
+    <script src="http://127.0.0.1:5173/js/extractor.js"></script>
+    <script src="http://127.0.0.1:5173/js/validation.js"></script>
+    <script src="http://127.0.0.1:5173/js/calendar.js"></script>
+    <script src="http://127.0.0.1:5173/js/ui.js"></script>
+    <script>
+        // Give the shared-text path a moment, then read the form the app filled in.
+        window.addEventListener('load', function () {
+            window.setTimeout(function () {
+                var params = new URLSearchParams(location.search);
+                document.getElementById('raw-text').value = params.get('text') || '';
+                document.getElementById('btn-extract').click();
+
+                var read = function (id) { return document.getElementById(id).value; };
+                var out = {
+                    title: read('event-title'),
+                    date: read('event-date'),
+                    start: read('event-start'),
+                    end: read('event-end'),
+                    location: read('event-location'),
+                    descriptionLength: read('event-desc').length,
+                    notice: document.getElementById('extraction-notice').textContent,
+                    hint: document.getElementById('extraction-hint').textContent
+                };
+                var pre = document.createElement('pre');
+                pre.id = 'readout';
+                pre.textContent = 'READOUT=' + JSON.stringify(out);
+                document.body.appendChild(pre);
+            }, 200);
+        });
+    </script>
+</body>
+</html>

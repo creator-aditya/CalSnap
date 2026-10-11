@@ -69,7 +69,7 @@ function Invoke-Smoke {
 
     Write-Host ''
     Write-Host "===== $Label =====" -ForegroundColor Cyan
-    if ($dom -match 'SMOKE_RESULTS=(\{.*?\})</pre>') {
+    if ($dom -match '(?:SMOKE_RESULTS|READOUT)=(\{.*?\})</pre>') {
         $json = $Matches[1] -replace '&quot;', '"' -replace '&amp;', '&' -replace '&lt;', '<' -replace '&gt;', '>'
         $json | ConvertFrom-Json | ConvertTo-Json -Depth 6
     } else {
@@ -90,6 +90,15 @@ $messy = [uri]::EscapeDataString(
     "Hi team!`n`n**Winter Party**`nWhen: Friday, 18 December 2026, 7:00 PM until late`nWhere: The Old Mill, Riverside`n`nBring a Secret Santa gift (max 15) and a dish to share.`nRSVP: https://example.com/rsvp"
 )
 Invoke-Smoke 'share target: messy real-world text' "$FixtureBase/tests/browser-share.html?text=$messy"
+
+# A whole page description pasted as one paragraph - the shape that used to fail with
+# "No event title could be found". Prints the form fields the application filled in.
+$paragraph = 'The Event name as NextGen AI & Tech Summit 2026 will take place on Thursday, November 12, 2026, ' +
+    'from 09:00 AM to 05:00 PM IST (with registration opening early at 08:15 AM). This premier industry event, ' +
+    'hosted by the Nexus Innovations Group, will be held at The Grand Ballroom inside the ITC Grand Chola, ' +
+    'located at No. 63, Anna Salai, Guindy, Chennai, Tamil Nadu, 600032.'
+Invoke-Smoke 'paragraph description -> filled form fields' `
+    "$FixtureBase/tests/browser-fields.html?text=$([uri]::EscapeDataString($paragraph))"
 
 Write-Host ''
 Write-Host 'Smoke tests finished. Compare the values above with the expectations in README section 6.' -ForegroundColor Green
