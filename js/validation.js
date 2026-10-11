@@ -91,8 +91,15 @@
             var location = String(input.location || '').trim();
             var description = String(input.description || '').trim();
             var reminder = String(input.reminder || 'none').trim();
+
             // Carried through from extraction: the end time falls on the next day.
-            var endNextDay = input.endNextDay === true || input.endNextDay === 'true';
+            // Only trusted when there is actually an end time earlier than the start
+            // time — the only case where "next day" makes physical sense. A stale
+            // true from extraction is silently corrected when the user has since
+            // edited the times into a same-day range.
+            var endNextDay = (input.endNextDay === true || input.endNextDay === 'true') &&
+                this.isTime(endTime) && this.isTime(startTime) &&
+                endTime <= startTime;
 
             // --- Required details -------------------------------------------------
             if (!title) {
@@ -148,7 +155,7 @@
 
             // --- Past / far future ------------------------------------------------
             if (start) {
-                if (start.getTime() < now.getTime()) {
+                if (start.getTime() < now.getTime() - 6 * 60 * 60 * 1000) {
                     warnings.push({
                         field: 'date',
                         message: 'This start time is in the past, so a reminder may never fire.'

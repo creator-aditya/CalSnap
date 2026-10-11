@@ -83,6 +83,11 @@
     var LOCATION_LABEL = /^[ \t>*_>-]*(?:location|where|venue|address|place)\s*[:\-–]\s*(.+)$/i;
     var TITLE_LABEL = /^[ \t>*_>-]*(?:event(?:\s*name)?|title|subject|summary|meeting|webinar|session)\s*[:\-–]\s*(.+)$/i;
 
+    // A zero-minute time is only spurious when it is NOT a real midnight form.
+    // Accepts: "midnight", "12 AM", "12:00 AM", "12am", "12:00am", "00:00",
+    // "0:00" - any of the ways a writer can spell the start of the day.
+    var MIDNIGHT_RAW = /^(?:midnight|12(?::00)?\s*a\.?m\.?|0?0:00)$/i;
+
     var Extractor = {
 
         /* ------------------------------------------------------------------ *
@@ -125,7 +130,8 @@
             var labeledTitle = this.findLabeledTitle(lines);
             var lineTitle = labeledTitle || this.titleFromLines(lines);
             // The URL slug is only a fallback for a link-only share; real text wins.
-            var title = lineTitle || this.titleFromUrl(urls[0]);
+            var urlTitle = !lineTitle ? this.titleFromUrl(urls[0]) : '';
+            var title = lineTitle || urlTitle;
 
             var details = {
                 title: title || '',
@@ -146,7 +152,7 @@
             // Record which phrase produced each value so the UI can explain
             // itself and the tests can assert provenance.
             details.sources = {
-                title: labeledTitle ? 'label' : (title ? 'line' : ''),
+                title: labeledTitle ? 'label' : (lineTitle ? 'line' : (urlTitle ? 'url' : '')),
                 date: parsedDate ? parsedDate.matched : '',
                 startTime: timeInfo.startMatched || '',
                 endTime: timeInfo.endMatched || '',
@@ -204,8 +210,11 @@
                 }
             }
             if (starts && !details.startTime && page.timeOfDay) {
-                var pageTime = this.parseTime(String(page.timeOfDay).trim());
-                if (pageTime || /^midnight$/i.test(String(page.timeOfDay).trim())) {
+                var pageTimeRaw = String(page.timeOfDay).trim();
+                var pageTime = this.parseTime(pageTimeRaw);
+                // A page that declares "12:00 AM" or "00:00" is just as exact as one
+                // that spells "midnight"; accept every zero-minute midnight form.
+                if (pageTime || MIDNIGHT_RAW.test(pageTimeRaw)) {
                     details.startTime = this.to24Hour(Math.floor(pageTime / 60), pageTime % 60);
                     details.sources.startTime = 'page';
                 }
@@ -290,10 +299,11 @@
                 details.description = page.description;
                 details.sources.description = 'page';
             } else {
-                // Keep only the part of the page that reads as writing. When nothing
-                // does, the description is left empty rather than filled with menus.
+                // Keep only the part of the page that reads as writing, closed at a full
+                // stop. When nothing does, the description is left empty rather than
+                // filled with menus.
                 var prose = (typeof UrlFetch === 'object' && UrlFetch && UrlFetch.proseFrom)
-                    ? UrlFetch.proseFrom(details.description, 700)
+                    ? UrlFetch.proseFrom(details.description, 1400)
                     : '';
                 details.description = prose || '';
                 if (prose) details.sources.description = 'page-prose';
@@ -544,7 +554,11 @@
 
             /** Adds one parsed time, ignoring duplicates and unparseable values. */
             function add(minutes, raw, start, end) {
-                if (!minutes && !/^(?:midnight|12\s*a\.?m\.?)$/i.test(raw)) return;
+                // A zero-minute value is only spurious when it is not a real
+                // midnight form. "12:00 AM", "12 AM", "00:00" and "midnight"
+                // all mean 00:00 and must be kept; anything else that parses to
+                // zero ("", "abc") is dropped.
+                if (!minutes && !MIDNIGHT_RAW.test(raw)) return;
                 if (found.some(function (entry) { return entry.minutes === minutes; })) return;
                 found.push({
                     minutes: minutes,
@@ -960,8 +974,7 @@
             out = out.replace(/\s*\([^()]{0,200}?\)/g, ' ');
 
             // Month-name dates, either order, with optional day and year. Run twice: one
-            // replacement can leave a second date-shaped remnant ("12 July 2026" ->
-            // "12 " + a leftover year) that only the repeat will catch.
+            // replacement can leave a second date-shaped remnant ("12 July 2026" -> "12 " + a leftover year) that only the repeat will catch.
             var monthFirst = new RegExp('(?:\\bon\\s+)?[\\s,;:(]*' + months + '\\.?\\s+' + day + '(?:,?\\s+\\d{4})?', 'gi');
             var dayFirst = new RegExp('(?:\\bon\\s+)?[\\s,;:(]*' + day + '\\s+(?:of\\s+)?' + months + '\\.?(?:,?\\s+\\d{4})?', 'gi');
             out = out.replace(monthFirst, ' ').replace(dayFirst, ' ');

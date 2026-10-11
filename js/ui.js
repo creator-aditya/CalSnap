@@ -17,10 +17,10 @@
      * browser is running a cached copy of the code - see the README section on
      * updating a deployed copy.
      */
-    var APP_VERSION = '1.1.1';
+    var APP_VERSION = '1.1.2';
 
     var SHARED_PARAM_NAMES = ['text', 'title', 'url', 'share', 'description'];
-    var TEXT_FIELDS = ['title', 'date', 'start', 'end', 'location', 'description'];
+    var TEXT_FIELDS = ['title', 'date', 'startTime', 'endTime', 'location', 'description', 'reminder'];
     var MISSING_TEXT = {
         title: 'title',
         date: 'date',
@@ -328,9 +328,24 @@
                 return;
             }
 
-            var opened = window.open(url, '_blank', 'noopener');
-            if (!opened) {
-                showStatus('Your browser blocked the new tab. Open this link to continue: ' + url, 'error');
+            var opened = window.open(url, '_blank');
+            if (opened) {
+                // Prevent the new page from accessing window.opener.
+                opened.opener = null;
+            } else {
+                // Popup blocked: show a fallback link.
+                el.status.textContent = '';
+                el.status.className = 'status error';
+
+                var msg = document.createTextNode('Your browser blocked the new tab. Open this link to continue: ');
+                var a = document.createElement('a');
+                a.href = url;
+                a.textContent = 'Google Calendar';
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+
+                el.status.appendChild(msg);
+                el.status.appendChild(a);
                 return;
             }
 

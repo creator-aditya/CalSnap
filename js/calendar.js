@@ -72,7 +72,10 @@
             if (event && /^\d{2}:\d{2}$/.test(String(event.endTime || ''))) return event.endTime;
             if (!event || !/^\d{2}:\d{2}$/.test(String(event.startTime || ''))) return '';
             var parts = String(event.startTime).split(':');
-            var minutes = Math.min(+parts[0] * 60 + +parts[1] + 60, 23 * 60 + 59);
+            // One hour after the start. If that runs past midnight the time wraps
+            // to the next day ("23:30" -> "00:30"); resolveWindow() notices the
+            // backwards range and rolls the end date forward.
+            var minutes = (+parts[0] * 60 + +parts[1] + 60) % (24 * 60);
             return two(Math.floor(minutes / 60)) + ':' + two(minutes % 60);
         },
 
@@ -95,19 +98,30 @@
         /** RFC 5545 line folding at 75 octets, continued with a leading space. */
         foldLine: function (line) {
             var text = String(line);
-            if (text.length <= 75) return text;
+            // Fast path only when every character is single-byte, so .length is a
+            // safe proxy for the octet count. A non-ASCII line must fall through
+            // to the byte-counting loop below.
+            if (text.length <= 75 && !/[^\x00-\x7F]/.test(text)) return text;
 
             var out = [];
             var current = '';
+            var currentBytes = 0;
+
             for (var i = 0; i < text.length; i++) {
                 var char = text[i];
-                var bytes = encodeURIComponent(char).replace(/%[0-9A-F]{2}/g, 'x').length;
-                var limit = out.length === 0 ? 75 : 74; // a continuation line loses one octet to the space
-                if (current.length + bytes > limit) {
+                // Handle surrogate pairs (emoji etc.)
+                if (char >= '\uD800' && char <= '\uDBFF' && i + 1 < text.length) {
+                    char += text[++i];
+                }
+                var charBytes = unescape(encodeURIComponent(char)).length; // UTF-8 byte count
+                var limit = out.length === 0 ? 75 : 74;
+                if (currentBytes + charBytes > limit) {
                     out.push(current);
                     current = '';
+                    currentBytes = 0;
                 }
                 current += char;
+                currentBytes += charBytes;
             }
             if (current) out.push(current);
             return out.join('\r\n ');
@@ -178,7 +192,7 @@
             // apply the calendar default, which is why the interface says to check it.
             var minutes = parseInt(event.reminder, 10);
             if (minutes > 0 && this.REMINDER_LABELS[String(minutes)]) {
-                params.set('rem', 'popup:' + minutes);
+                params.set('rem', 'popup_' + minutes);
             }
 
             return GOOGLE_ENDPOINT + '?' + params.toString();

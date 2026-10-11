@@ -39,7 +39,7 @@
         if (!value) return false;
         // http(s)://... or a bare domain such as example.com/events/123
         return /^https?:\/\/\S+$/i.test(value) ||
-            /^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/\S*)?$/i.test(value);
+            /^(?:www\.)?[a-z0-9-]+(?:\.[a-z]{2,})+(?:\/\S*)?$/i.test(value);
     }
 
     /** Adds a scheme when the user typed a bare domain. */
@@ -208,32 +208,15 @@
         eventFacts: function (markdown) {
             var facts = { dates: [], times: [], venue: '', duration: '' };
             // A reader service writes the fact block as one line per fact, each starting
-            // with an image marker:
-            //
-            //   [Image 18](...calendar.png) Sat 14 Nov 2026 - Sat 9 Jan 2027
-            //   [Image 19](...time.png) 7:00 PM
-            //   [Image 24](...location.png) Sophia Bhabha Auditorium: Mumbai
-            //
-            // The whole block can itself sit inside one markdown link, so the text is
-            // split on the markers first: matching greedily across the line took the
-            // first marker and swallowed every fact after it.
-                // A reader service writes the fact block as one line per fact, each
-                // starting with an image marker:
-                //
-                //   [Image 18](...calendar.png) Sat 14 Nov 2026 - Sat 9 Jan 2027
-                //   [Image 19](...time.png) 7:00 PM
-                //   [Image 24](...location.png) Sophia Bhabha Auditorium: Mumbai
-                //
-                // The block can sit inside one markdown link and the whole page can be a
-                // single line, so the text is split into one record per fact first:
-                // matching greedily across lines took only the first fact.
-                var records = String(markdown || '')
-                    .replace(/\[Image\s+\d+\s*\]\([^)]*\)/gi, '\n')
-                    .split('\n');
-                var segments = ['', ''];
-                for (var s = 1; s < records.length; s++) segments.push(records[s]);
+            // with an image marker. The whole block can sit inside one markdown link and
+            // the whole page can be a single line, so the text is split into one record
+            // per fact first: matching greedily across lines took only the first fact.
+            var records = String(markdown || '')
+                .replace(/\[Image\s+\d+\s*\]\([^)]*\)/gi, '\n')
+                .split('\n');
+            var segments = records.slice(1);
 
-            for (var i = 1; i < segments.length; i++) {
+            for (var i = 0; i < segments.length; i++) {
                 // Each segment runs until the markdown markup of the next link, and the
                 // venue segment may carry a trailing "! [Image 25]" for a map icon.
                 var value = String(segments[i])
@@ -304,6 +287,45 @@
         },
 
         /**
+         * End a piece of text at a sentence boundary.
+         *
+         * A calendar description that stops mid-sentence ("AURA brings together the
+         * energy of a glo...") looks broken, so the text is always closed at a full stop.
+         * The character limit is a target rather than a hard cut: sentences are added
+         * while they fit, and the next whole sentence is allowed to overshoot it.
+         * Truncation only happens when a single sentence is longer than the limit.
+         *
+         * @param {string} value
+         * @param {number} limit longest acceptable length, in characters
+         */
+        endAtSentence: function (value, limit) {
+            var text = String(value || '').replace(/\s{2,}/g, ' ').trim();
+            if (!text) return '';
+            var max = limit || 700;
+            if (text.length <= max) return text; // already complete, leave it untouched
+
+            // Sentence-shaped pieces, keeping their punctuation.
+            var pieces = text.match(/[^.!?]*[.!?]+["')\]]*|[^.!?]+$/g) || [text];
+            var kept = '';
+
+            for (var i = 0; i < pieces.length; i++) {
+                var next = (kept ? kept + ' ' : '') + pieces[i].trim();
+                // A single piece longer than the limit cannot be closed at a sentence.
+                if (next.length > max) break;
+                kept = next;
+                if (kept.length >= max) break;
+            }
+
+            kept = kept.trim();
+            if (kept) return kept;
+
+            // No sentence fits: cut at a word boundary rather than mid-word.
+            var cut = text.slice(0, max - 3);
+            var lastSpace = cut.lastIndexOf(' ');
+            return (lastSpace > max * 0.5 ? cut.slice(0, lastSpace) : cut).trim() + '...';
+        },
+
+        /**
          * The written description of the event, when the page has one.
          *
          * An event page carries far more navigation than prose: taking the whole page
@@ -333,8 +355,10 @@
                     continue;
                 }
                 collected.push(line);
-                if (collected.join(' ').length > 1200) break;
+                if (collected.join(' ').length > 4000) break;
             }
+
+            if (!collected.length) return '';
 
             var about = collected.join(' ').replace(/\s{2,}/g, ' ').replace(/^[\s,;:–—-]+/, '').trim();
             if (!about) return '';
@@ -342,7 +366,7 @@
             // The collected block always starts with the page furniture that precedes the
             // heading (the heading itself is glued to the text that follows it), so the
             // prose is selected out of it rather than the block being returned as it is.
-            var prose = this.proseOnly(about, 700);
+            var prose = this.proseOnly(about, 1400);
             if (prose) return prose;
 
             // No labelled section: pick the descriptive lines out of the page instead.
@@ -458,7 +482,8 @@
 
             var prose = kept.join(' ').replace(/\s{2,}/g, ' ').trim();
             if (prose.length < 40) return '';
-            return prose.length > limit ? prose.slice(0, limit - 3).trim() + '...' : prose;
+            // Never stop mid-sentence: the limit is a target, closed at a full stop.
+            return this.endAtSentence(prose, limit);
         },
 
         /**
@@ -606,10 +631,6 @@
             out = out
                 .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')                 // ![alt](url) -> gone
                 .replace(/\[([^\]]*)\]\((?:[^)]*)\)/g, '$1')           // [text](url) -> text
-                // A reader service prefixes its own "Title:" and "URL Source:" lines. The
-                // title is reported separately, so the preamble is dropped here: left in,
-                // the extractor reads "Title: ..." as the user labelling the event, which
-                // then protects a page-derived date from the page's own stated facts.
                 .replace(/^\s*Title:.*$/gim, ' ')
                 .replace(/^\s*(?:URL Source|Markdown Content|Published Time|Warning):.*$/gim, ' ')
                 .replace(/^#{1,6}\s*/gm, '')                           // markdown headings
@@ -627,14 +648,7 @@
         },
 
         /**
-         * The page's own headline, cleanest source first:
-         *   1. the main heading the page shows (<h1>, or the first markdown heading)
-         *   2. og:title / twitter:title
-         *   3. <title>, or the leading "Title:" line a reader service adds
-         *
-         * Site names and marketing tails are removed ("... Tickets - BookMyShow",
-         * "Comedy Shows, Stand up Comedy, Events Events Tickets"), because the calendar
-         * entry should read as the event, not as the page's search keywords.
+         * The page's own headline, cleanest source first.
          */
         pageTitle: function (html) {
             var page = String(html || '');
@@ -659,7 +673,7 @@
             }
             headingText = decodeEntities(
                 headingText
-                    .replace(/!?\[[^\]]*\]\([^)]*\)/g, ' ')  // images and links
+                    .replace(/!?\[[^\]]*\]\([^)]*\)/g, ' ')
                     .replace(/[\[\]]/g, ' ')
             ).replace(/\s+/g, ' ').trim();
             if (headingText.length >= 3 && headingText.length <= 120) return this.cleanTitle(headingText);
@@ -670,8 +684,6 @@
 
         /**
          * Strip the parts of a page headline that are not the event name.
-         *   "Sharon Verma Live  Comedy Shows, Stand up Comedy, Events Events Tickets
-         *    - BookMyShow"  ->  "Sharon Verma Live"
          */
         cleanTitle: function (value) {
             var title = decodeEntities(value).replace(/\s+/g, ' ').trim();
@@ -691,7 +703,6 @@
                 if (title === before) break;
             }
 
-            // The name must keep some words; if the cleanup emptied it, keep the original.
             if (title.replace(/[^A-Za-z0-9]/g, '').length < 3) {
                 return decodeEntities(value).replace(/\s+/g, ' ').trim();
             }
@@ -700,16 +711,10 @@
 
         /**
          * The venue a reader-service page reports, if it does.
-         *
-         * These pages put a location icon before the venue and often show the city
-         * after a colon ("Sophia Bhabha Auditorium: Mumbai"). Requiring one of those
-         * two marks is what stops navigation text being mistaken for a venue.
          */
         venueHint: function (text) {
             var lines = String(text || '').split('\n');
             var placeWord = /\b(?:club|hall|centre|center|theatre|theater|auditorium|arena|stadium|grounds?|park|rooms?|office|studio|gallery|museum|library|hotel|resort|restaurant|cafe|café|bar|pub|lounge|mall|convention|academy|institute|campus|school|college|university|church|temple|mosque|marina|pavilion|gardens?|palace|mill|warehouse|rooftop|banquet|amphitheatre|amphitheater|society|sabha|bhavan|bhawan|kendra|maidan)\b/i;
-            // A reader service reports its own failures, and its error banner has the
-            // shape of a labelled field ("Warning: Target URL returned error 404").
             var meta = /^(?:warning|error|notice|target url|url source|title|markdown content|published time)\b/i;
 
             for (var i = 0; i < lines.length; i++) {
@@ -719,7 +724,6 @@
                 if (/[:]\s*[A-Z][a-z]+$/.test(line) && placeWord.test(line)) return line;
             }
 
-            // "Venue: X" or "Location: X" as an explicit label.
             for (var j = 0; j < lines.length; j++) {
                 if (meta.test(lines[j].trim())) continue;
                 var labelled = lines[j].match(/^\s*(?:venue|location|where)\s*[:\-]\s*(.+)$/i);
@@ -751,8 +755,12 @@
                     throw error;
                 }
                 return response.text();
-            }).finally(function () {
+            }).then(function (text) {
                 clearTimeout(timer);
+                return text;
+            }, function (err) {
+                clearTimeout(timer);
+                throw err;
             });
         },
 
@@ -800,15 +808,28 @@
                     });
             };
 
-            var note = function (error) {
-                var status = error && error.status;
+            // Track the most meaningful error across all three attempts so the final
+            // message reflects the real cause (e.g. a 403 from direct is more
+            // informative than a network error from readerText that ran after it).
+            var lastError = null;
+            var track = function (fn) {
+                return fn().catch(function (err) {
+                    if (!lastError || (err && (err.status === 403 || err.status === 401))) {
+                        lastError = err;
+                    }
+                    throw err;
+                });
+            };
+
+            var note = function () {
+                var status = lastError && lastError.status;
                 return { ok: false, route: '', reason: (status === 403 || status === 401) ? REASON.blocked : REASON.offline };
             };
 
-            return direct()
-                .catch(function () { return readerHtml(); })
-                .catch(function () { return readerText(); })
-                .catch(function (error) { return note(error); });
+            return track(direct)
+                .catch(function () { return track(readerHtml); })
+                .catch(function () { return track(readerText); })
+                .catch(function () { return note(); });
         }
     };
 

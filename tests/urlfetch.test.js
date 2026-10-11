@@ -327,6 +327,51 @@ test('reader: a page with no write-up yields an empty description rather than me
     assert.equal(extracted.description, '', 'navigation must never become the description');
 });
 
+test('reader: a long write-up is kept whole, not cut mid-sentence', () => {
+    /*
+     * Reported: "AURA brings together the energy of a glo..." - the description stopped
+     * in the middle of a word, which looks broken in a calendar entry. The limit is now a
+     * target that the text is closed at, never a raw character cut.
+     */
+    const writeUp = 'After taking his AURA to sold-out stadiums and arenas around the world, ' +
+        'Diljit Dosanjh is coming home! Following an overwhelming response from fans globally, ' +
+        'Diljit is bringing the AURA World Tour to India - taking the celebration PAN India and ' +
+        'giving audiences across the country the chance to experience it live. Fresh from his ' +
+        "landmark headline performance at London's Wembley Stadium, Diljit returns to the country " +
+        'that has shaped his music, culture and journey. And AURA is coming back on a scale like ' +
+        'never before. Expect his biggest hits, electrifying bhangra, high-octane performances and ' +
+        'a larger-than-life production built for world-class stages. AURA brings together the ' +
+        'energy of a global icon with the intimacy of a homecoming, making every night unforgettable.';
+
+    // A write-up of this size must survive untouched, without a stray "...".
+    assert.equal(UrlFetch.endAtSentence(writeUp, 1400), writeUp,
+        'a description that fits the limit must not be altered at all');
+
+    // Under a tighter limit the text is closed at a sentence, not mid-word.
+    const tightened = UrlFetch.endAtSentence(writeUp, 700);
+    assert.ok(tightened.length <= 700, 'the tightened text stays within the limit, was ' + tightened.length);
+    assert.match(tightened, /[.!?]$/, 'the text must end at a sentence: ' + JSON.stringify(tightened.slice(-60)));
+    assert.equal(tightened.includes('glo...'), false, 'no mid-word cut');
+    assert.match(tightened, /world-class stages\.$/, 'it ends at the last complete sentence that fits');
+});
+
+test('reader: a single sentence longer than the limit is cut at a word, not mid-word', () => {
+    const oneLongSentence = 'This is one very long sentence without any internal stop ' + 'word '.repeat(200) + 'end';
+    const out = UrlFetch.endAtSentence(oneLongSentence, 200);
+
+    assert.ok(out.length <= 210, 'stays near the limit, was ' + out.length);
+    assert.match(out, /\.\.\.$/, 'marked as cut when it could not be closed at a sentence');
+    assert.equal(/\bwor\.\.\.$/.test(out), false, 'must not cut in the middle of a word');
+});
+
+test('reader: prose selection also ends at a sentence', () => {
+    const about = 'About The Event ' + 'Some women have it all together. '.repeat(40);
+    const prose = UrlFetch.proseOnly(about, 700);
+
+    assert.match(prose, /together\.$/, 'the selected prose ends at a full stop');
+    assert.equal(prose.includes('...'), false, 'no ellipsis when the text closed at a sentence');
+});
+
 /* -------------------------------------------------------------------------- *
  * Guards
  * -------------------------------------------------------------------------- */
