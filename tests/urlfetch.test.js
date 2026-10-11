@@ -264,6 +264,69 @@ test('url: a run of dates is reported as a date, never as an invented time', () 
     assert.ok(extracted.missing.includes('startTime'), 'the user is asked for the time');
 });
 
+test('reader: the description is the event write-up, not the page furniture', () => {
+    const page = UrlFetch.parseHtml(READER_PAGE);
+    const extracted = Extractor.extract(page.title + '\n' + page.text, { now: NOW, page });
+    const description = extracted.description;
+
+    // What the calendar entry must contain: the page's own words about the event.
+    assert.match(description, /Some women have it all together/);
+    assert.match(description, /stand-up/);
+    assert.match(description, /navigating life with a little experience/);
+
+    // What it must not contain: the page's navigation, its search keywords, its footer.
+    for (const junk of [
+        'Skip to main content', 'Search for Movies', 'Sign in', 'Gift Cards', 'ListYourShow',
+        'Comedy Shows, Stand up Comedy, Events Events Tickets', 'BookMyShow', 'are interested',
+        'About The Event', 'Read More', 'Artists', 'M-Ticket', 'Fast-track Entry', 'Learn How',
+        'You May Also Like', 'Events in Top Cities', 'Copyright'
+    ]) {
+        assert.equal(description.includes(junk), false,
+            'the description must not contain "' + junk + '": ' + description);
+    }
+
+    assert.ok(description.length <= 700, 'the description stays a readable length, was ' + description.length);
+});
+
+test('reader: prose scoring separates writing from navigation', () => {
+    const prose = 'Some women have it all together. Sharon Verma is not one of them.';
+    const labels = 'Stand up Comedy Comedy Shows 121 are interested';
+    const menu = 'Movies Stream Events Plays Sports Activities ListYourShow Corporates Offers Gift Cards';
+    // The threshold proseFrom() uses to decide a line is worth keeping.
+    const KEEP = 0.35;
+
+    assert.ok(UrlFetch.proseScore(prose) > 0.4, 'prose should score high, got ' + UrlFetch.proseScore(prose));
+    assert.ok(UrlFetch.proseScore(labels) < KEEP, 'labels must not reach the keep threshold, got ' + UrlFetch.proseScore(labels));
+    assert.ok(UrlFetch.proseScore(menu) < KEEP, 'a menu must not reach the keep threshold, got ' + UrlFetch.proseScore(menu));
+
+    assert.equal(UrlFetch.isHeadingLine('About The Event'), true);
+    assert.equal(UrlFetch.isHeadingLine('Artists'), true);
+    assert.equal(UrlFetch.isHeadingLine('Some women have it all together.'), false);
+});
+
+test('reader: a label glued to the first sentence does not survive', () => {
+    const glued = 'Sharon Verma Live Stand up Comedy Comedy Shows 121 are interested ' +
+        'About The Event Some women have it all together. Sharon Verma is not one of them.';
+    const prose = UrlFetch.proseOnly(glued, 700);
+
+    assert.match(prose, /^Some women have it all together/);
+    assert.doesNotMatch(prose, /About The Event/);
+    assert.doesNotMatch(prose, /are interested/);
+});
+
+test('reader: a page with no write-up yields an empty description rather than menus', () => {
+    const menus = [
+        'Movies Stream Events Plays Sports Activities',
+        'ListYourShow Corporates Offers Gift Cards',
+        'Events in Mumbai Events in Delhi-NCR Events in Chennai',
+        'Copyright 2026 Example Ltd.'
+    ].join('\n');
+    const page = UrlFetch.parseHtml('<html><body>' + menus + '</body></html>');
+    const extracted = Extractor.extract(page.text || menus, { now: NOW, page });
+
+    assert.equal(extracted.description, '', 'navigation must never become the description');
+});
+
 /* -------------------------------------------------------------------------- *
  * Guards
  * -------------------------------------------------------------------------- */

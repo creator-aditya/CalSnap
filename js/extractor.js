@@ -280,18 +280,23 @@
                 details.sources.location = 'page';
             }
 
-            // The page's own write-up is written for the event, so it is a better calendar
-            // description than page furniture. It replaces the text when that text is
-            // clearly a page capture rather than the user's own words.
-            if (page.description && page.description.length >= 40 && details.description.length > 200) {
+            // The description for a link input.
+            //
+            // A page's own write-up is written for the event, so it is the right calendar
+            // description. When the page offers none, the prose already selected out of
+            // the page is used. A raw page capture is never pasted in whole: that put
+            // menus, search keywords and the site's footer into the user's calendar entry.
+            if (page.description && page.description.length >= 40) {
                 details.description = page.description;
                 details.sources.description = 'page';
-            }
-
-            // Last resort for a link input: keep only the opening of a long page capture,
-            // so the calendar entry does not carry every menu on the page.
-            if (details.description.length > 900 && !page.description) {
-                details.description = details.description.slice(0, 900).trim() + '...';
+            } else {
+                // Keep only the part of the page that reads as writing. When nothing
+                // does, the description is left empty rather than filled with menus.
+                var prose = (typeof UrlFetch === 'object' && UrlFetch && UrlFetch.proseFrom)
+                    ? UrlFetch.proseFrom(details.description, 700)
+                    : '';
+                details.description = prose || '';
+                if (prose) details.sources.description = 'page-prose';
             }
 
             details.pageSource = page.source || '';

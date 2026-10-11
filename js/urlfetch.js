@@ -307,15 +307,17 @@
          * The written description of the event, when the page has one.
          *
          * An event page carries far more navigation than prose: taking the whole page
-         * gave a 3,500 character calendar entry made of menus. The "About" section is
-         * the part written for a reader, so it is preferred for a link input.
+         * gave a calendar entry made of menus and search keywords. The page's own
+         * "About" section is the part written for a reader, so it is preferred, and if
+         * that is missing the prose is picked out line by line.
          *
-         * @returns {string} '' when the page has no such section
+         * @returns {string} '' when the page has nothing that reads as a description
          */
         aboutSection: function (text) {
             var lines = String(text || '').split('\n');
-            var heading = /^(?:about (?:the )?(?:event|show|this event)|event details?|about|overview|description|synopsis|the show)$/i;
-            var stopAt = /^(?:artists?|cast|m-?ticket|terms|venue|you may also like|reviews?|gallery|photos?|faqs?|offers?|sponsors?|organiser|organizer|contact|follow)\b/i;
+            // A markdown heading may still carry its "#" markers at this point.
+            var heading = /^#{0,6}\s*(?:about (?:the )?(?:event|show|this event)|event details?|about this|about|overview|description|synopsis|the show|details)\s*$/i;
+            var stopAt = /^#{0,6}\s*(?:artists?|cast|m-?ticket|terms|venue|you may also like|reviews?|gallery|photos?|faqs?|offers?|sponsors?|organiser|organizer|contact|follow|similar|recommended)\b/i;
             var collected = [];
             var started = false;
 
@@ -330,17 +332,133 @@
                     if (collected.length) break;
                     continue;
                 }
-                // A line that is a menu of links rather than a sentence.
-                if (line.split(/\s+/).length > 2 && line.split(/\s+/).length < 6 && !/[.。!?]$/.test(line) &&
-                    /(?:gift cards|offers|sign in|book now|list your show|events in)/i.test(line)) continue;
                 collected.push(line);
-                if (collected.join(' ').length > 900) break;
+                if (collected.join(' ').length > 1200) break;
             }
 
-            var about = collected.join(' ').replace(/\s{2,}/g, ' ').trim();
-            // Only useful when it actually reads as prose.
-            if (about.length < 60 || about.split('.').length < 2) return '';
-            return about.length > 1000 ? about.slice(0, 997).trim() + '...' : about;
+            var about = collected.join(' ').replace(/\s{2,}/g, ' ').replace(/^[\s,;:–—-]+/, '').trim();
+            if (!about) return '';
+
+            // The collected block always starts with the page furniture that precedes the
+            // heading (the heading itself is glued to the text that follows it), so the
+            // prose is selected out of it rather than the block being returned as it is.
+            var prose = this.proseOnly(about, 700);
+            if (prose) return prose;
+
+            // No labelled section: pick the descriptive lines out of the page instead.
+            return this.proseFrom(text, 700);
+        },
+
+        /**
+         * How much a line reads like written prose rather than navigation.
+         *
+         * Navigation is a list of capitalised labels with almost no connecting words
+         * ("Stand up Comedy Comedy Shows"); real prose is mostly lower case, uses words
+         * like "the", "of" and "is", and ends its sentences. The ratio of those
+         * connecting words separates the two reliably enough to filter with.
+         */
+        proseScore: function (line) {
+            var text = String(line || '').trim();
+            var words = text.split(/\s+/).filter(Boolean);
+            if (words.length < 4) return 0;
+
+            var functional = /^(?:a|an|the|of|to|in|on|at|for|with|and|or|but|is|are|was|were|be|been|being|it|its|this|that|these|those|her|his|their|my|our|your|she|he|they|we|you|i|as|by|from|not|no|so|if|when|while|about|into|over|up|out|than|then|there|here|who|which|what|how|all|any|some|every|can|will|would|just|only|very|too|also|please|ae|aajao)$/i;
+            var lowercase = 0;
+            var linkish = 0;
+
+            words.forEach(function (word) {
+                if (functional.test(word.replace(/[^\w']/g, ''))) lowercase++;
+                if (/^[A-Z][a-z]+$/.test(word)) linkish++;
+                if (/^(?:https?|www)|\]\(/i.test(word)) linkish += 2;
+            });
+
+            var score = lowercase / words.length;
+            if (/[.!?。]["')\]]?$/.test(text)) score += 0.1;   // finishes a sentence
+            if (linkish / words.length > 0.5) score -= 0.2;    // a row of labels
+            if (/\bsign in\b|\bgift cards\b|\bbook now\b|\blist your show\b|\bpay tm\b/i.test(text)) score -= 0.3;
+
+            return score;
+        },
+
+        /**
+         * Pick the descriptive part out of a page.
+         *
+         * Lines are filtered strictly first (0.35, which a run of labels does not reach),
+         * then the prose is selected out of what is left. The strict pass keeps a
+         * navigation line from pulling the furniture in, and the second pass removes the
+         * section label that is glued to the first real sentence.
+         */
+        proseFrom: function (text, maxLength) {
+            var limit = maxLength || 700;
+            var candidates = String(text || '')
+                .split('\n')
+                .map(function (line) { return line.trim(); })
+                .filter(function (line) {
+                    return line && !this.isHeadingLine(line) && this.proseScore(line) >= 0.35;
+                }, this);
+
+            if (!candidates.length) return '';
+            return this.proseOnly(candidates.join(' '), limit);
+        },
+
+        /** A section label rather than a sentence: "About The Event", "Artists". */
+        isHeadingLine: function (line) {
+            var text = String(line || '').trim().replace(/^#{1,6}\s*/, '');
+            if (text.length > 40) return false;
+            var heading = /^(?:about(?: the)?(?: event| show| this event)?|event details?|overview|description|synopsis|details|the show|artists?|cast|venue|terms(?: &| and) conditions|m-?ticket|reviews?|gallery|faqs?|offers?|similar events|recommended|you may also like|read more|show more|learn how|book now)$/i;
+            return heading.test(text);
+        },
+
+        /**
+         * Trim page furniture off the front of a section and keep only its prose.
+         *
+         * The "About" heading arrives in the same block as the text that follows it, so a
+         * naive slice left "Sharon Verma Live Stand up Comedy Comedy Shows 121 are
+         * interested About The Event ..." in front of the real description. Sentences are
+         * scored, and the run that reads as writing is what survives.
+         */
+        proseOnly: function (text, maxLength) {
+            var limit = maxLength || 700;
+            var value = String(text || '').replace(/\s{2,}/g, ' ').trim();
+            if (!value) return '';
+
+            // Split into sentences AND on every section label, on both sides of it. The
+            // furniture in front of a description is often one unpunctuated run, and the
+            // label is glued to the sentence that follows:
+            //   "... 121 are interested About The Event Some women have it all together."
+            // Splitting only before the label left "About The Event Some women have it all
+            // together.", which scored as prose and kept the label.
+            var labelSplit = /\s*\b(?:about(?: the)?(?: event| show| this event)?|event details?|overview|synopsis|description|artists?|cast|venue|m-?ticket|terms(?: &| and) conditions|reviews?|gallery|faqs?|offers?|you may also like|read more|show more|learn how|book now)\b\s*/gi;
+            var sentences = value
+                .replace(labelSplit, '\n')
+                .split(/\n|(?<=[.!?])\s+/)
+                .filter(Boolean);
+
+            var kept = [];
+            var started = false;
+
+            for (var i = 0; i < sentences.length; i++) {
+                var sentence = sentences[i].trim().replace(/^[|,;:–—-]+/, '');
+                if (!sentence) continue;
+
+                var trimmedLabel = sentence.replace(/[.!?]+$/, '').trim();
+                if (this.isHeadingLine(trimmedLabel)) {
+                    if (started) break; // a later section label ends the description
+                    continue;           // a leading label is furniture
+                }
+
+                if (!started) {
+                    // The description begins at the first part that reads as writing.
+                    if (this.proseScore(sentence) < 0.2) continue;
+                    started = true;
+                }
+                kept.push(sentence);
+                if (kept.join(' ').length >= limit) break;
+            }
+
+            var prose = kept.join(' ').replace(/\s{2,}/g, ' ').trim();
+            if (prose.length < 40) return '';
+            return prose.length > limit ? prose.slice(0, limit - 3).trim() + '...' : prose;
         },
 
         /**
@@ -421,10 +539,17 @@
             result.text = this.stripBoilerplate(this.htmlToText(page));
 
             // A page's own write-up is a better calendar description than its menus.
-            // og:description comes first, then the "About" section of the page.
+            // og:description comes first, then the "About" section, then the prose the
+            // page contains. Only text that reads as writing is used: navigation must
+            // never end up in the calendar entry.
             if (!result.description) {
                 var about = this.aboutSection(result.text);
-                if (about) result.description = about;
+                if (about) {
+                    result.description = about;
+                } else {
+                    var prose = this.proseFrom(result.text);
+                    if (prose) result.description = prose;
+                }
             }
 
             if (!result.title) {

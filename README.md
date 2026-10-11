@@ -302,7 +302,7 @@ Pages redeploys automatically on every push. Service-worker changes take effect 
 next visit: `sw.js` fetches code **network-first**, so a deployed change is never hidden
 behind a stale cache. The cache name in `sw.js` (`calsnap-3`) is versioned so old files
 are dropped as soon as the new worker activates, and the footer of the page shows the
-running version (`Version 1.1.0`) so a cached copy is recognisable at a glance.
+running version (`Version 1.1.1`) so a cached copy is recognisable at a glance.
 
 If a change does not appear after a reload:
 
@@ -441,6 +441,32 @@ Page-stated facts also outrank text heuristics, which matters: a page is full of
 are not the event. On the BookMyShow page a banner image named
 `...-2026-10-8-t-17-14-58.jpg` supplied a wrong date until the page's own date took
 precedence. A date or title the **user** labelled by hand is never overridden.
+
+### The description is writing, not page furniture
+
+An event page is mostly navigation, so the link's page is not pasted into the Description
+field. CalSnap takes the page's own write-up, and when there is none it selects the part
+that reads as writing:
+
+```text
+before   Sharon Verma Live Comedy Shows, Stand up Comedy, Events Events Tickets -
+         BookMyShow Skip to main content Search for Movies... Sign in... Gift Cards...
+         About The Event Some women have it all together. ...
+
+after    Some women have it all together. Sharon Verma is not one of them. `Weak
+         Independent Woman` is an hour of stand-up navigating life with a little
+         experience and a lot of opinions. Born in Bihar, figuring things out in
+         Mumbai, Sharon is both edgy and scared. ...
+```
+
+Lines are scored on how much they read like prose: real writing is mostly lower case and
+uses connecting words ("the", "of", "is"), while navigation is a run of capitalised labels.
+A section label glued to the first sentence ("About The Event Some women have it all
+together.") is split off, so it cannot ride along. A page with no writing at all leaves the
+description **empty** rather than filling it with menus.
+
+Pasted **text** is different: your own words are kept as they are, because that is the most
+faithful description available.
 
 ### What it cannot do
 
