@@ -15,12 +15,13 @@
   "scripts": {
     "start": "node tools/serve.js",
     "serve": "node tools/serve.js",
-    "test": "node --test tests/extractor.test.js tests/validation.test.js tests/calendar.test.js tests/ui.test.js tests/workflow.test.js",
+    "test": "node --test tests/extractor.test.js tests/validation.test.js tests/calendar.test.js tests/ui.test.js tests/workflow.test.js tests/paragraph.test.js",
     "test:extractor": "node tests/extractor.test.js",
     "test:validation": "node tests/validation.test.js",
     "test:calendar": "node tests/calendar.test.js",
     "test:ui": "node tests/ui.test.js",
     "test:workflow": "node tests/workflow.test.js",
+    "test:paragraph": "node tests/paragraph.test.js",
     "sample": "node tools/make-sample.js",
     "sample:validate": "node tools/make-sample.js && python tools/validate-ics.py tools/sample-event.ics",
     "icons": "python tools/make-icons.py"

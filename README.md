@@ -171,17 +171,39 @@ http://127.0.0.1:5173/index.html?text=Design%20Summit%0A2026-05-01%20at%2010:00%
 ## 4. Running the tests
 
 ```bash
-npm test                 # all five suites (92 checks)
+npm test                 # all six suites (120 checks)
 npm run test:extractor   # event extraction from text
 npm run test:validation  # validation rules
 npm run test:calendar    # Google Calendar URL + .ics generation (with reminder)
 npm run test:ui          # interface wiring against a DOM stub
 npm run test:workflow    # the whole Share -> Extract -> Review -> Calendar flow
+npm run test:paragraph   # paragraph text -> decoded Google Calendar event
 ```
 
 The suites are plain Node files (`node --test`), with no test framework to install.
 `node tests/extractor.test.js` also works on its own, which is useful inside
 sandboxes that block the multi-process test runner.
+
+### Proving the details really reach Google Calendar
+
+Checking that a URL contains `20260314T040000` proves very little. `tests/paragraph.test.js`
+closes the loop instead: it takes realistic **paragraphs** (how event text actually arrives
+from a web page), runs the whole pipeline, then **decodes the generated Google Calendar URL
+back into event fields** with `tests/google-url-reader.js` and compares the result:
+
+```text
+paragraph text
+   -> Extractor.extract        title, date, start, end, location, description
+   -> Validation.validate      errors and warnings
+   -> generateGoogleUrl        one URL
+   -> readGoogleUrl            decoded title/date/start/end/location
+   -> asserted equal to what the user read in the paragraph
+```
+
+So a passing run means the title, date, start time, end time and location the user read are
+the ones Google Calendar will show. The same suite decodes the `.ics` file back through
+`tests/ics-reader.js`, checks an event that runs past midnight lands on the next day, and
+confirms that a **user correction** is what gets sent rather than the original guess.
 
 To inspect a real generated file by hand, and check it against the RFC 5545 rules
 with a checker that does not reuse the generator's own code:
@@ -195,14 +217,14 @@ What is covered, mapped to the requirements:
 
 | Requirement | Test |
 | --- | --- |
-| Titles extracted | `extractor.test.js` → *title: …* |
+| Titles extracted | `extractor.test.js` → *title: …*, `paragraph.test.js` |
 | Dates interpreted correctly (ISO, numeric, day-first, month names, "tomorrow", weekdays) | `extractor.test.js` → *date: …* |
 | Start/end times populated when available | `extractor.test.js` → *time: …* |
 | Locations extracted when available | `extractor.test.js` → *location: …* |
 | Descriptions retained | `extractor.test.js` → *description: …* |
 | Extracted fields editable | `ui.test.js` → *extracted fields stay editable* |
 | Invalid/incomplete details handled | `validation.test.js`, `ui.test.js` → *missing details block …* |
-| Google Calendar URL contains the right information | `calendar.test.js` → *google: …* |
+| Google Calendar URL contains the right information | `calendar.test.js` → *google: …*; `paragraph.test.js` decodes the URL and compares whole events |
 | `.ics` files contain the right event details | `calendar.test.js` → *ics: …* (read back with `tests/ics-reader.js`) |
 | Reminder included in the `.ics` file | `calendar.test.js` → *ics: each reminder option …* |
 | Browser sharing | `ui.test.js` → *sharing uses the web share sheet / falls back to the clipboard* |

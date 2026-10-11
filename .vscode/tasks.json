@@ -39,7 +39,8 @@
         "tests/validation.test.js",
         "tests/calendar.test.js",
         "tests/ui.test.js",
-        "tests/workflow.test.js"
+        "tests/workflow.test.js",
+        "tests/paragraph.test.js"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

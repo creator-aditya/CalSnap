@@ -91,6 +91,8 @@
             var location = String(input.location || '').trim();
             var description = String(input.description || '').trim();
             var reminder = String(input.reminder || 'none').trim();
+            // Carried through from extraction: the end time falls on the next day.
+            var endNextDay = input.endNextDay === true || input.endNextDay === 'true';
 
             // --- Required details -------------------------------------------------
             if (!title) {
@@ -117,6 +119,13 @@
 
             var start = this.toLocalDate(date, startTime);
             var end = this.toLocalDate(date, endTime);
+
+            // An end time that belongs to the next day ("from noon until midnight").
+            // The event genuinely runs past midnight, so validation and the calendar
+            // layer must both treat it that way instead of calling it a backwards range.
+            if (end && endNextDay) {
+                end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+            }
 
             // --- Chronology -------------------------------------------------------
             if (start && end) {
@@ -164,6 +173,7 @@
                     date: date,
                     startTime: startTime,
                     endTime: endTime,
+                    endNextDay: endNextDay,
                     location: location,
                     description: description,
                     reminder: reminder

@@ -383,6 +383,13 @@ footer p {
     margin: 0 auto;
 }
 
+.app-version {
+    margin-top: 0.6rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    opacity: 0.75;
+}
+
 /* ------------------------------------------------------------ responsive --- */
 
 /* Tablets and small laptops: more room, so the actions sit side by side. */

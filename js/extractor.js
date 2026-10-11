@@ -63,8 +63,20 @@
     // One clock time: "14:30", "2:30pm", "2 pm", "at 9". Bare hours are included
     // so range forms such as "2 to 4 PM" can be normalised before parsing.
     var TIME_PATTERN = /(\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?|\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)|(?:[01]?\d|2[0-3]):[0-5]\d|noon|midday|midnight|\b(?:1[0-2]|[1-9])\b(?=\s*(?:a\.?m\.?|p\.?m\.?)))/gi;
-    // "2 to 4 PM" / "9-11am": the meridiem at the end belongs to both times.
-    var BARE_RANGE_PATTERN = /(^|[^\d:])(\d{1,2})(\s*(?:-|–|—|to|until|till|thru|through)\s*)(\d{1,2})(\s*(?:a\.?m\.?|p\.?m\.?))/gi;
+    // "2 to 4 PM" / "9-11am" / "starts at 8 AM and ends at 11:30 AM": the meridiem
+    // written once at the end of a range applies to both times. Bare hours are only
+    // matched when a range connector proves they are times, never on their own.
+    // "2 to 4 PM" / "starts at 8 AM and finishes at 11:30 AM": the meridiem written
+    // once at the end of a range belongs to both times. The middle may only be a range
+    // separator, never arbitrary text, so a complete time ("9:30 AM to 4:00 PM") is
+    // left exactly as it is.
+    var RANGE_MIDDLE = '\\s*(?:-|–|—|to|until|till|thru|through)\\s*'
+        + '|\\s*(?:,?\\s*and\\s+)?(?:finishes|ends|closes)\\s+at\\s+'
+        + '|\\s*(?:,|and)\\s*';
+    var BARE_RANGE_PATTERN = new RegExp(
+        '(?<![\\d:])(\\d{1,2})(?![\\d:/\\-–—.])((?:' + RANGE_MIDDLE + '))(\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?))(?![\\d/\\-–—])',
+        'gi'
+    );
     // Where a location usually stops: the next time, date or labelled field.
     var TIME_FRAGMENT = /(?:\b(?:at|@|from)\s*)?(?:\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?|\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)|\bnoo?n\b|\bmidnight\b|\b\d{1,2}(?::\d{2})?\s*(?:-|–|—|to|until|till)\s*\d{1,2})/i;
     var DATE_FRAGMENT = new RegExp('\\b(?:today|tonight|tomorrow|tmrw|tmw|yesterday|next\\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|this\\s+(?:week|weekend|month|year)|on\\s+(?:' + MONTH_PATTERN + '|\\d)|(?:' + MONTH_PATTERN + ')\\s+\\d|\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})', 'i');
@@ -113,6 +125,9 @@
                 date: parsedDate ? this.formatDate(parsedDate.date) : '',
                 startTime: timeInfo.start || '',
                 endTime: timeInfo.end || '',
+                // True when the end time belongs to the following day, e.g. a party that
+                // runs "from noon until midnight".
+                endNextDay: !!timeInfo.endNextDay,
                 location: location || '',
                 // The user's own words are the most faithful description; nothing
                 // is summarised or invented here.
@@ -374,21 +389,47 @@
             var normalized = this.normalizeTimeRanges(text);
             var found = [];
             var match;
-            TIME_PATTERN.lastIndex = 0;
 
-            while ((match = TIME_PATTERN.exec(normalized)) !== null) {
-                var raw = match[0].trim();
-                var minutes = this.parseTime(raw);
-                if (!minutes && !/^(?:midnight|12\s*a\.?m\.?)$/i.test(raw)) continue;
-                if (found.some(function (entry) { return entry.minutes === minutes; })) continue;
+            /** Adds one parsed time, ignoring duplicates and unparseable values. */
+            function add(minutes, raw, start, end) {
+                if (!minutes && !/^(?:midnight|12\s*a\.?m\.?)$/i.test(raw)) return;
+                if (found.some(function (entry) { return entry.minutes === minutes; })) return;
                 found.push({
                     minutes: minutes,
-                    value: this.to24Hour(Math.floor(minutes / 60), minutes % 60),
+                    value: self.to24Hour(Math.floor(minutes / 60), minutes % 60),
                     raw: raw,
-                    start: match.index,
-                    end: match.index + match[0].length
+                    start: start,
+                    end: end
                 });
-                if (found.length >= 6) break;
+            }
+
+            // A range whose end is a word: "noon until midnight", "9:00 PM to midnight".
+            // Checked first, because those two times must stay paired.
+            var keywordRange = /(?:\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|noon|midday|midnight)\s*(?:-|–|—|to|until|till|thru|through)\s*(noon|midday|midnight)/i;
+            var wordRange = normalized.match(keywordRange);
+            if (wordRange) {
+                var head = wordRange[0].slice(0, wordRange[0].length - wordRange[1].length)
+                    .replace(/\s*(?:-|–|—|to|until|till|thru|through)\s*$/i, '').trim();
+                var startMinutes = this.parseTime(head);
+                var endMinutes = /^midnight$/i.test(wordRange[1]) ? 0 : 12 * 60;
+                var offset = wordRange.index;
+
+                if (startMinutes || /^midnight$/i.test(head)) {
+                    add(startMinutes, head, offset, offset + head.length);
+                    add(endMinutes, wordRange[1], offset + wordRange[0].length - wordRange[1].length,
+                        offset + wordRange[0].length);
+                }
+            }
+
+            TIME_PATTERN.lastIndex = 0;
+            if (found.length === 0) {
+                while ((match = TIME_PATTERN.exec(normalized)) !== null) {
+                    // Trim sentence punctuation the pattern may have absorbed ("2 PM.").
+                    var raw = match[0].trim().replace(/[.,;:!?]+$/, '');
+                    if (!raw) continue;
+                    add(this.parseTime(raw), raw, match.index, match.index + match[0].length);
+                    if (found.length >= 6) break;
+                }
             }
 
             if (found.length === 0) return { start: '', end: '', times: [] };
@@ -398,19 +439,28 @@
                 startMatched: found[0].raw,
                 end: '',
                 endMatched: '',
+                endNextDay: false,
                 times: found.map(function (entry) { return entry.value; })
             };
 
             if (found.length > 1) {
                 var between = normalized.slice(found[0].end, found[1].start);
-                var isRange = SEPARATOR_PATTERN.test(between) ||
+                var isRange = found[1].keyword ||
+                    SEPARATOR_PATTERN.test(between) ||
+                    /(?:finishes|ends|closes)\s+at\s*$/i.test(between) ||
                     TIME_TAIL_PATTERN.test(found[0].raw) ||
                     TIME_TAIL_PATTERN.test(between);
                 if (isRange) {
                     var endMinutes = self.inferEndMeridiem(found[0].raw, found[1], found[0].minutes);
-                    if (endMinutes > found[0].minutes) {
-                        result.end = self.to24Hour(Math.floor(endMinutes / 60), endMinutes % 60);
+                    // A range ending at the word "midnight" finishes at the end of that
+                    // day, not at its start, so the guard must not treat it as too early.
+                    // Only the word counts: an explicit "00:30" is a real clock time.
+                    var wraps = endMinutes === 24 * 60 || /^midnight$/i.test(found[1].raw);
+                    if (wraps || endMinutes > found[0].minutes) {
+                        var endValue = wraps ? 0 : endMinutes;
+                        result.end = self.to24Hour(Math.floor(endValue / 60), endValue % 60);
                         result.endMatched = found[1].raw;
+                        result.endNextDay = wraps;
                     }
                 }
             }
@@ -424,9 +474,20 @@
          * before the times are parsed.
          */
         normalizeTimeRanges: function (text) {
-            return String(text).replace(BARE_RANGE_PATTERN, function (whole, lead, first, sep, second, trail) {
-                if (!lead && /\d/.test(lead)) return whole;
-                return lead + first + ' ' + trail.trim() + sep + second + trail;
+            // "2 to 4 PM" and "starts at 8 AM and finishes at 11:30 AM" both describe a
+            // range, so the meridiem written once at the end is copied onto the start.
+            // The separator is only accepted when it really connects two times, so an
+            // unrelated pair of numbers is left untouched.
+            return String(text).replace(BARE_RANGE_PATTERN, function (whole, first, between, end) {
+                var isRange = /^\s*(?:-|–|—|to|until|till|thru|through)\s*$/i.test(between) ||
+                    /(?:-|–|—|to|until|till|thru|through)\s*$/i.test(between) ||
+                    /(?:finishes|ends|closes|until|till|through|thru)\s+at\s*$/i.test(between) ||
+                    /^\s*(?:and|,)\s*(?:finishes|ends|closes)\s+at\s*$/i.test(between);
+                if (!isRange) return whole;
+
+                var meridiem = (end.match(/(?:a|p)\.?m\.?/i) || [''])[0];
+                var startHasMeridiem = /(?:a|p)\.?m\.?/i.test(first);
+                return first + (startHasMeridiem || !meridiem ? '' : ' ' + meridiem) + between + end;
             });
         },
 
@@ -465,6 +526,12 @@
          */
         inferEndMeridiem: function (startRaw, endEntry, startMinutes) {
             var endValue = endEntry.minutes;
+
+            // "noon until midnight" / "from noon to midnight": midnight ends the day,
+            // so the event finishes 24 hours after the start of the day, not at its start.
+            if (/^(noon|midday)$/i.test(startRaw) && /^midnight$/i.test(endEntry.raw)) {
+                return 24 * 60;
+            }
             if (/(am|pm)/i.test(endEntry.raw)) return endValue;
             if (/^(noon|midday|midnight)$/i.test(endEntry.raw)) return endValue;
 
@@ -501,17 +568,22 @@
                 }
             }
 
+            // Look at every "at" / "in" / "@" and prefer the last usable one: the first
+            // often introduces a time ("... at 4:30 PM in Meeting Room 2"), which is not
+            // a location.
             var joined = lines.join(' ');
-            var inline = joined.match(/\s(?:at|@|in)\s+([^,.;\n]+(?:,\s*[^,.;\n]+)*)/i);
-            if (inline && !this.looksLikeDateTime(inline[1])) {
-                var candidate = this.cleanLocation(inline[1]);
-                if (candidate) return candidate;
+            var marker = /\s(?:at|@|in)\s+/gi;
+            var candidates = [];
+            var found;
+            while ((found = marker.exec(joined)) !== null) {
+                candidates.push(joined.slice(marker.lastIndex, marker.lastIndex + 140));
             }
 
-            var venue = joined.match(/\b(?:at|@)\s+([A-Z][\w'’&.-]*(?:\s+(?:[A-Z][\w'’&.-]*|of|the|and))*(?:\s+(?:Hotel|Hall|Center|Centre|Room|Office|Cafe|Café|Restaurant|Theatre|Theater|Stadium|Park|Arena|Convention|Library|School|College|University)\b)?)/);
-            if (venue) {
-                var venueValue = this.cleanLocation(venue[1]);
-                if (venueValue) return venueValue;
+            for (var c = candidates.length - 1; c >= 0; c--) {
+                var head = candidates[c].split(/[.;\n]/)[0];
+                if (this.looksLikeDateTime(head)) continue;
+                var candidate = this.cleanLocation(head);
+                if (candidate) return candidate;
             }
 
             return '';
@@ -556,6 +628,9 @@
             // would swallow the whole rest of the sentence.
             cleaned = cleaned.split(TIME_FRAGMENT)[0];
             cleaned = cleaned.split(DATE_FRAGMENT)[0];
+            // Stop at the clause that starts describing the address rather than naming
+            // the place: "The Grand Ballroom inside the ITC Grand Chola, located at No. 63".
+            cleaned = cleaned.split(/\s+(?:inside|within|located\s+at|at\s+No\.?|which\s+is)\b/i)[0];
             cleaned = cleaned.split(/\s+(?=(?:Date|Time|When|Where|Description|Details|Price|Cost|Register|Tickets|Notes|Agenda)\b)/i)[0];
             cleaned = cleaned.split(/[.!?]\s+/)[0].split(/\s+[|•]\s+/)[0];
             cleaned = cleaned.replace(/[\s,;:\-–—]+$/, '').trim();
@@ -638,33 +713,147 @@
          * Only reached for long, sentence-like candidates, so a genuine title such
          * as "April 22 Planning" is never touched.
          */
+        /** Stop words: a year behind one of these belongs to a date, not to a name. */
+        YEAR_STOP_WORDS: ['on', 'at', 'in', 'from', 'to', 'until', 'till', 'by', 'for', 'of', 'the', 'a', 'an',
+            'and', 'or', 'is', 'are', 'was', 'will', 'be', 'held', 'starts', 'ends', 'finishes', 'closes',
+            'runs', 'starting', 'between', 'every', 'during', 'after', 'before',
+            'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
+            'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september',
+            'october', 'november', 'december',
+            'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'],
+
+        /**
+         * Does the year at `index` belong to the event name rather than to a date?
+         *   "... AI & Tech Summit 2026 will take place on Thursday, November 12, 2026"
+         *        ^ name                                     ^ date
+         * The year is part of the name when the word in front of it is a real word:
+         * "Summit 2026" and "Q3 2026" keep it, while "on 2026", "November 12, 2026"
+         * and "2026-10-01" do not.
+         */
+        yearBelongsToName: function (text, index) {
+            var before = String(text).slice(0, index);
+            var word = (before.replace(/\s+$/, '').split(/\s+/).pop() || '').toLowerCase();
+            if (!word) return false;
+            if (this.YEAR_STOP_WORDS.indexOf(word) !== -1) return false;
+            if (/^\d+$/.test(word)) return false;        // "12" from "November 12, 2026"
+            if (/[a-z]\d{1,2}$/.test(word)) return true; // "Q3", "TechFest2026"
+            if (word.length < 3) return false;
+            if (/[-\/.,]\s*$/.test(before)) return false; // "2026," or "2026-04"
+            return true;
+        },
+
+        /** All 4-digit years that must be preserved because they name the event. */
+        nameYearsIn: function (text) {
+            var out = [];
+            var pattern = /(?<![0-9-])[0-9]{4}(?![0-9-])/g;
+            var match;
+            while ((match = pattern.exec(String(text))) !== null) {
+                if (this.yearBelongsToName(text, match.index)) out.push(match[0]);
+            }
+            return out;
+        },
+
+        /**
+         * Remove a date/time phrase that sits inside a sentence, e.g.
+         * "... will take place on Thursday, November 12, 2026, from 09:00 AM to
+         * 05:00 PM IST (with registration opening early at 08:15 AM). This ..."
+         * -> "... will take place. This ..."
+         *
+         * Only reached for long, sentence-like candidates, so a genuine title such
+         * as "April 22 Planning" is never touched.
+         */
         stripEmbeddedDateAndTime: function (value) {
             var months = '(?:' + MONTH_PATTERN + ')';
             var day = '\\d{1,2}(?:st|nd|rd|th)?';
-            var year = '(?:,?\\s+\\d{4})';
-            var time = '\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)';
+            var year = '\\d{4}';
+            // A real clock time: minutes or a meridiem are required. A bare number is
+            // never matched on its own, or it would eat digits out of years and names.
+            var clock = '\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)';
+            var connector = '(?:-|–|—|to|until|till|thru|through)';
+            var keyword = '(?:noon|midday|midnight)';
             var out = String(value);
 
-            // "(with registration opening early at 08:15 AM)" and similar asides
-            out = out.replace(/\s*\([^()]{0,160}?(?:\d{1,2}:\d{2}|\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?))[^()]{0,80}?\)/gi, ' ');
-
-            var monthDay = new RegExp('(?:\\bon\\s+)?(?:[A-Z][a-z]+,\\s+)?' + months + '\\.?\\s+' + day + '(?:' + year + ')?', 'gi');
-            var dayMonth = new RegExp('(?:\\bon\\s+)?' + day + '\\s+(?:of\\s+)?' + months + '\\.?(?:' + year + ')?', 'gi');
-            var isoDate = /\b\d{4}-\d{1,2}-\d{1,2}\b/g;
-            var numericDate = /\b\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}\b/g;
-            var range = new RegExp('(?:,?\\s*(?:from|between)\\s+)?' + time + '\\s*(?:-|–|—|to|until|till|thru|through)\\s*' + time + '(?:\\s*[A-Z]{2,4}\\b)?', 'gi');
-            // Standalone clock times, with or without a leading "at"/"from".
-            var single = new RegExp('(?:,?\\s*(?:starting\\s+)?(?:at|from)\\s+)?' + time, 'gi');
-
-            [monthDay, dayMonth, isoDate, numericDate, range, single].forEach(function (pattern) {
-                out = out.replace(pattern, ' ');
+            // Hide the years that belong to the name, so no date rule can remove them.
+            // The marker carries the year itself, so it survives whatever reordering
+            // the later rules do.
+            out = out.replace(/(?<![0-9-])[0-9]{4}(?![0-9-])/g, function (found, offset) {
+                if (!Extractor.yearBelongsToName(value, offset)) return found;
+                return '\u0001' + found + '\u0001';
             });
 
-            // A bare weekday that is left over belongs to the date that was removed
-            // ("Friday, 18 December 2026" -> "Friday,"), not to the event name.
+            // Parenthesised asides: "(doors open at 06:30 PM)", "(please register 10
+            // minutes early)".
+            out = out.replace(/\s*\([^()]{0,200}?\)/g, ' ');
+
+            // Month-name dates, either order, with optional day and year. Run twice: one
+            // replacement can leave a second date-shaped remnant ("12 July 2026" ->
+            // "12 " + a leftover year) that only the repeat will catch.
+            var monthFirst = new RegExp('(?:\\bon\\s+)?[\\s,;:(]*' + months + '\\.?\\s+' + day + '(?:,?\\s+\\d{4})?', 'gi');
+            var dayFirst = new RegExp('(?:\\bon\\s+)?[\\s,;:(]*' + day + '\\s+(?:of\\s+)?' + months + '\\.?(?:,?\\s+\\d{4})?', 'gi');
+            out = out.replace(monthFirst, ' ').replace(dayFirst, ' ');
+            out = out.replace(monthFirst, ' ').replace(dayFirst, ' ');
+            out = out.replace(/\b\d{4}-\d{1,2}-\d{1,2}\b/g, ' ');
+            out = out.replace(/\b\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}\b/g, ' ');
+
+            // Times. Bare-hour ranges are matched while their shape is intact, so
+            // "from 2 to 4 PM" is removed whole instead of leaving "to" behind.
+            out = out.replace(new RegExp('(?:,?\\s*(?:from|between)\\s+)?\\d{1,2}\\s*' + connector + '\\s*\\d{1,2}\\s*(?:a\\.?m\\.?|p\\.?m\\.?)', 'gi'), ' ');
+            out = out.replace(new RegExp('(?:,?\\s*(?:from|between)\\s+)?' + clock + '\\s*' + connector + '\\s*' + clock + '(?:\\s*[A-Z]{2,4}\\b)?', 'gi'), ' ');
+            // A keyword on either side: "noon until midnight", "9:00 PM until midnight".
+            out = out.replace(new RegExp('(?:,?\\s*(?:from|between)\\s+)?' + clock + '\\s*' + connector + '\\s*' + keyword, 'gi'), ' ');
+            out = out.replace(new RegExp('(?:,?\\s*(?:from|between)\\s+)?' + keyword + '\\s*' + connector + '\\s*(?:' + clock + '|' + keyword + ')', 'gi'), ' ');
+            out = out.replace(new RegExp('(?:\\s*(?:,?\\s*and\\s+)?(?:finishes|ends|closes|runs)\\s+at\\s+)' + clock, 'gi'), ' ');
+            out = out.replace(new RegExp('(?:,?\\s*(?:starting\\s+)?(?:at|from)\\s+)?' + clock, 'gi'), ' ');
+
+            // Relative day words and weekday names belong to the date, not to the name.
+            out = out.replace(/\b(?:today|tonight|tomorrow|tmrw|tmw|yesterday|this\s+(?:morning|afternoon|evening|week|weekend|month)|next\s+(?:week|month|year)|day\s+after\s+tomorrow)\b/gi, ' ');
             out = out.replace(/\b(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi, ' ');
 
-            return out.replace(/\s{2,}/g, ' ').trim();
+            // A day number left over from a month-name date: only when a month name was
+            // present, and only when the number sits directly against it. A number that
+            // belongs to the name ("Meeting Room 2", "Q3 2026") is left alone.
+            if (new RegExp('\\b' + months + '\\b', 'i').test(value)) {
+                out = out.replace(/^\s*\d{1,2}(?:st|nd|rd|th)?\b/, ' ');           // "4 October"
+                out = out.replace(new RegExp('\\b' + day + '\\s*(?=$|[,.;:!?])', 'g'), ' '); // "October 4."
+                // Numbers left behind once the month name went ("... Party, 12 26 at ...").
+                // New text boundaries protect numbers that belong to the name.
+                out = out.replace(/(^|[,.;:!?]\s*)\d{1,2}\s+\d{4}(?=\s|[,.;:!?]|$)/g, '$1');
+                out = out.replace(/\s+\d{1,2}(?=\s+(?:at|on|in|from|to)\b)/gi, ' ');
+            }
+
+            // Tidy the gaps: doubled spaces, spaces before punctuation, orphan commas,
+            // and a chain of prepositions or connectors left without an object
+            // ("... on at .", "... on from"). Removing one word can strand the next, so
+            // this repeats until the text stops changing.
+            var previous = null;
+            var tidy = new RegExp(
+                '\\s*\\b(?:on|at|in|from|until|till|starting|between|and|the|a|an|of|to|come|join|meet)\\b\\s*(?=[,.;:!?]|$)', 'gi');
+            for (var pass = 0; pass < 8 && out !== previous; pass++) {
+                previous = out;
+                out = out
+                    .replace(/\s{2,}/g, ' ')
+                    .replace(/\s+([,.;:!?])/g, '$1')
+                    .replace(/,\s*(?=[,.;:!?])/g, '')
+                    .replace(tidy, ' ');
+            }
+
+            // Bring the protected years back.
+            out = out.replace(/\u0001\s*(\d{4})\s*\u0001/g, '$1');
+
+            // Last pass over leftovers that the removal rules created between them:
+            // a day number orphaned by its month ("... Party, 12 at the Gardens"), a day
+            // waiting in front of one, an hour orphaned by its own minutes
+            // ("9:00 PM until midnight" -> "9 until midnight"), and the connector left
+            // where a keyword used to be.
+            out = out.replace(new RegExp('\\s*\\b' + connector + '\\b\\s*(?=' + keyword + ')', 'gi'), ' ');
+            out = out.replace(/\s+\d{1,2}(?=\s+(?:at|on|in)\b)/gi, ' ');
+            out = out.replace(/(\bon|\bfrom|\bat)\s+\d{1,2}\s+(?=[A-Z])/g, '$1 ');
+
+            return out
+                .replace(/^[\s,;:–—-]+/, '')
+                .replace(/[\s,;:–—-]+$/, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
         },
 
         /**
@@ -674,15 +863,36 @@
          */
         trimDanglingDate: function (text) {
             var value = String(text);
-            var fragment = '(?:\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[\\/.]\\d{1,2}[\\/.]\\d{2,4}|(?:' + MONTH_PATTERN +
-                ')\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?))';
-            for (var pass = 0; pass < 3; pass++) {
+            var months = '(?:' + MONTH_PATTERN + ')';
+            var day = '\\d{1,2}(?:st|nd|rd|th)?';
+            // A real clock time: either minutes ("15:00") or a meridiem ("3 PM") is
+            // required. A bare number is never matched on its own, or it would eat
+            // digits out of years and names.
+            var clock = '(?:\\d{1,2}:\\d{2}|\\d{1,2}\\s*(?:a\\.?m\\.?|p\\.?m\\.?))';
+            var connector = '(?:-|–|—|to|until|till|thru|through)';
+            // Any date or time phrase, in the forms the extractor understands.
+            var fragment = '(?:' + [
+                '\\d{4}-\\d{1,2}-\\d{1,2}',
+                '\\d{1,2}[\\/.]\\d{1,2}[\\/.]\\d{2,4}',
+                '\\d{1,2}\\s*' + connector + '\\s*\\d{1,2}\\s*(?:a\\.?m\\.?|p\\.?m\\.?)',
+                months + '\\.?\\s+' + day + '(?:,?\\s+\\d{4})?',
+                day + '\\s+(?:of\\s+)?' + months + '\\.?(?:,?\\s+\\d{4})?',
+                clock + '\\s*' + connector + '\\s*' + clock,
+                '(?:noon|midday|midnight)\\s*' + connector + '\\s*(?:noon|midday|midnight)',
+                clock
+            ].join('|') + ')';
+
+            for (var pass = 0; pass < 4; pass++) {
                 var before = value;
                 value = value
-                    .replace(new RegExp('[\\s,;:–—-]+(?:on|at|from|to|by|in|until|till|starting|between)?\\s*' + fragment + '[\\s,;:–—-]*$', 'i'), '')
+                    // A fragment anywhere, not only at the end: the date and time are
+                    // extracted separately, so a leftover one in the name is debris.
+                    .replace(new RegExp('[\\s,;:–—-]*(?:on|at|from|to|by|in|until|till|starting|between)\\s*' + fragment, 'gi'), ' ')
+                    .replace(new RegExp('[\\s,;:–—-]*' + fragment + '[\\s,;:–—-]*(?:on|at|from|to|by|in|until|till|starting|between)?\\s*$', 'i'), '')
                     .replace(/[\s,;:.!?–—-]+$/, '')
                     .replace(/\s+(?:on|at|in|from|to|by|for|with|of|the|a|an|and|until|till|starting|between)$/i, '')
-                    .replace(/[\s,;:.!?–—-]+$/, '');
+                    .replace(/[\s,;:.!?–—-]+$/, '')
+                    .replace(/\s{2,}/g, ' ');
                 if (value === before) break;
             }
             return value.trim();
@@ -703,12 +913,16 @@
             var cut = text.search(this.TITLE_CUT_PATTERN);
             if (cut > 1) text = text.slice(0, cut);
 
+            // Cut at the end of the first sentence, then at the first comma when what is
+            // left is still long: a name is a phrase, not a paragraph.
             text = text.split(/[.!?]\s+/)[0];
-            // A long candidate with no sentence break is better cut at the first
-            // comma than shown as a wall of text.
             if (text.length > 90 && text.indexOf(',') > 8) {
                 text = text.slice(0, text.indexOf(','));
             }
+
+            // Anything from the first comma that follows a date/time fragment is
+            // description, not name ("... on 2026-11-05 from 2 to 4 PM, come and meet").
+            text = text.split(/,\s*(?=[a-z])/)[0];
 
             return this.trimDanglingDate(text);
         },

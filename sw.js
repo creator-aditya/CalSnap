@@ -1,20 +1,29 @@
 /**
  * CalSnap service worker.
  *
- * Its only job is to make the application shell available offline (and to make
- * the installed app start instantly). It deliberately ignores everything else:
+ * It provides two things:
+ *   1. an offline copy of the application shell, and
+ *   2. an instant start for the installed app.
  *
- *  - only same-origin GET requests are handled;
- *  - the manifest and the service worker itself are always fetched from the
- *    network so a deployment is picked up on the next visit;
- *  - page navigations are network-first, so a shared link (?text=...&url=...)
- *    always reaches the real page instead of a cached copy without the query.
+ * Fetch strategy - the important part:
  *
- * Assets are listed with relative paths so the app also works when it is served
- * from a sub-path, e.g. https://user.github.io/calsnap/.
+ *   navigations and the application's own code (HTML, CSS, JS, manifest)
+ *       -> NETWORK FIRST. Whenever the device is online, the newest deployed
+ *          version wins, so a code change can never be hidden behind a stale cache.
+ *          The cache is only used when the network fails.
+ *   icons and other static assets
+ *       -> CACHE FIRST, refreshed in the background. These change rarely and
+ *          loading them instantly is what makes the app feel native.
+ *   anything else (including other origins)
+ *       -> not handled at all.
+ *
+ * CACHE_NAME must be changed whenever a cached asset changes. It is bumped by
+ * hand here because the project has no build step to hash files automatically.
+ * Even if a bump is forgotten, the network-first rule above still delivers fresh
+ * code; the bump only controls how quickly the offline copy is replaced.
  */
 
-const CACHE_NAME = 'calsnap-v2';
+const CACHE_NAME = 'calsnap-v3';
 const SHELL_ASSETS = [
     './',
     './index.html',
@@ -28,6 +37,24 @@ const SHELL_ASSETS = [
     './icon-192.png',
     './icon-512.png'
 ];
+
+/** Code and documents: always try the network first so updates are never stale. */
+function isFreshAsset(url) {
+    return url.pathname.endsWith('/') || /\.(?:html|css|js|json)$/i.test(url.pathname);
+}
+
+function fromCache(request, fallback) {
+    return caches.match(request).then((cached) => cached || (fallback ? caches.match(fallback) : undefined));
+}
+
+function refresh(request, response) {
+    if (!response || response.status !== 200 || response.type !== 'basic') return response;
+    const copy = response.clone();
+    caches.open(CACHE_NAME)
+        .then((cache) => cache.put(request, copy))
+        .catch(() => undefined);
+    return response;
+}
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
@@ -54,37 +81,27 @@ self.addEventListener('fetch', (event) => {
 
     const url = new URL(request.url);
     if (url.origin !== self.location.origin) return;
-    if (url.pathname.endsWith('/manifest.json') || url.pathname.endsWith('/sw.js')) return;
 
-    // Navigations: network first, so shared text in the query string is honoured.
-    if (request.mode === 'navigate') {
+    if (request.mode === 'navigate' || isFreshAsset(url)) {
+        // Network first: a deployed change is picked up on the next load.
         event.respondWith(
             fetch(request)
-                .then((response) => {
-                    const copy = response.clone();
-                    caches.open(CACHE_NAME)
-                        .then((cache) => cache.put(request, copy))
-                        .catch(() => undefined);
-                    return response;
-                })
-                .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
+                .then((response) => refresh(request, response))
+                .catch(() => fromCache(request, './index.html'))
         );
         return;
     }
 
-    // Static assets: cache first, refreshed in the background.
+    // Icons and other rarely changing files: cache first, refreshed in the background.
     event.respondWith(
         caches.match(request).then((cached) => {
-            if (cached) return cached;
-            return fetch(request).then((response) => {
-                if (response && response.status === 200 && response.type === 'basic') {
-                    const copy = response.clone();
-                    caches.open(CACHE_NAME)
-                        .then((cache) => cache.put(request, copy))
-                        .catch(() => undefined);
-                }
-                return response;
-            });
+            if (cached) {
+                fetch(request)
+                    .then((response) => refresh(request, response))
+                    .catch(() => undefined);
+                return cached;
+            }
+            return fetch(request).then((response) => refresh(request, response));
         })
     );
 });

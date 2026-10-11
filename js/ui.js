@@ -12,6 +12,13 @@
 (function () {
     'use strict';
 
+    /**
+     * Shown in the footer. If this number is not the version you expect, the
+     * browser is running a cached copy of the code - see the README section on
+     * updating a deployed copy.
+     */
+    var APP_VERSION = '1.0.2';
+
     var SHARED_PARAM_NAMES = ['text', 'title', 'url', 'share', 'description'];
     var TEXT_FIELDS = ['title', 'date', 'start', 'end', 'location', 'description'];
     var MISSING_TEXT = {
@@ -73,6 +80,9 @@
             // from a sub-path such as https://user.github.io/calsnap/.
             navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(function () { /* not user-facing */ });
         }
+
+        var versionLabel = document.getElementById('app-version');
+        if (versionLabel) versionLabel.textContent = 'Version ' + APP_VERSION;
 
         /* ------------------------------------------------------------------ *
          * Extraction

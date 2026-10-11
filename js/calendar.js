@@ -125,7 +125,17 @@
             if (!start || !end) return null;
 
             var assumedEnd = !(event.endTime && /^\d{2}:\d{2}$/.test(String(event.endTime)));
-            if (end.getTime() <= start.getTime()) end = new Date(start.getTime() + 60 * 60 * 1000);
+            var nextDay = event.endNextDay === true || event.endNextDay === 'true';
+            var sameInstant = start.getFullYear() === end.getFullYear() &&
+                start.getMonth() === end.getMonth() && start.getDate() === end.getDate();
+            // An end time that belongs to the next day is real, not a backwards range:
+            // "from noon until midnight" ends at 00:00 the following day. The comparison
+            // is by time of day, because on the same date midnight sorts before noon.
+            if (nextDay && (sameInstant || end.getTime() <= start.getTime())) {
+                end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+            } else if (end.getTime() <= start.getTime()) {
+                end = new Date(start.getTime() + 60 * 60 * 1000);
+            }
 
             return {
                 start: start,
@@ -133,6 +143,7 @@
                 startStamp: this.toICSStamp(start),
                 endStamp: this.toICSStamp(end),
                 endTime: endTime,
+                endNextDay: end.getDate() !== start.getDate() || end.getMonth() !== start.getMonth(),
                 assumedEnd: assumedEnd
             };
         },
