@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!--
+        Browser smoke test for the share-target path: the application is opened
+        with the query parameters a browser or the PWA share target sends, and the
+        outcome is printed as JSON. Test fixture, not part of the application.
+    -->
+    <title>CalSnap share-target smoke test</title>
+</head>
+<body>
+    <div class="app-container">
+        <section id="input-section" class="glass-card">
+            <label for="raw-text">Event text</label>
+            <textarea id="raw-text" rows="5"></textarea>
+            <button id="btn-extract" type="button"><span id="btn-text">Extract Event Details</span></button>
+            <p id="extraction-notice" class="notice hidden"></p>
+        </section>
+
+        <section id="review-section" class="glass-card hidden">
+            <button id="btn-back" type="button">back</button>
+            <p id="extraction-hint" class="notice hidden"></p>
+            <form id="event-form">
+                <input type="text" id="event-title">
+                <input type="date" id="event-date">
+                <input type="time" id="event-start">
+                <input type="time" id="event-end">
+                <input type="text" id="event-location">
+                <textarea id="event-desc"></textarea>
+                <select id="event-reminder">
+                    <option value="none">No reminder</option>
+                    <option value="15">15 minutes before</option>
+                    <option value="60">1 hour before</option>
+                    <option value="1440">1 day before</option>
+                </select>
+            </form>
+            <button id="btn-google" type="button">Open Google Calendar</button>
+            <button id="btn-ics" type="button">Download .ics file</button>
+            <button id="btn-share" type="button">Share event details</button>
+        </section>
+    </div>
+    <div id="status" class="status hidden"></div>
+
+    <script src="../js/extractor.js"></script>
+    <script src="../js/validation.js"></script>
+    <script src="../js/calendar.js"></script>
+    <script src="../js/ui.js"></script>
+    <script>
+        // Read the DOM state a moment after the UI has processed the shared input.
+        window.addEventListener('load', function () {
+            window.setTimeout(function () {
+                var results = {
+                    query: location.search,
+                    textarea: document.getElementById('raw-text').value,
+                    title: document.getElementById('event-title').value,
+                    date: document.getElementById('event-date').value,
+                    start: document.getElementById('event-start').value,
+                    location: document.getElementById('event-location').value,
+                    reviewVisible: !document.getElementById('review-section').classList.contains('hidden'),
+                    noticeKind: document.getElementById('extraction-notice').className,
+                    notice: document.getElementById('extraction-notice').textContent,
+                    hint: document.getElementById('extraction-hint').textContent
+                };
+                var target = document.createElement('pre');
+                target.id = 'smoke-results';
+                target.textContent = 'SMOKE_RESULTS=' + JSON.stringify(results);
+                document.body.appendChild(target);
+            }, 300);
+        });
+    </script>
+</body>
+</html>

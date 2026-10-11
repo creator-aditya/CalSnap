@@ -1,0 +1,453 @@
+/*
+ * CalSnap stylesheet.
+ *
+ * Layout is mobile first: one column, comfortable tap targets, and the two-column
+ * date/time row only appears when there is room for it. Everything is plain CSS
+ * with no framework, so the whole application stays three small scripts and one
+ * stylesheet. Light and dark themes follow the operating system preference.
+ */
+
+:root {
+    --primary: #6366f1;
+    --primary-strong: #4f46e5;
+    --secondary: #a855f7;
+    --bg-top: #eef2ff;
+    --bg-bottom: #f8fafc;
+    --surface: #ffffff;
+    --surface-muted: #f8fafc;
+    --text: #0f172a;
+    --text-muted: #5b6478;
+    --border: #dfe3ec;
+    --focus: rgba(99, 102, 241, 0.25);
+    --success-bg: #ecfdf5;
+    --success-text: #065f46;
+    --warning-bg: #fffbeb;
+    --warning-text: #92400e;
+    --error-bg: #fef2f2;
+    --error-text: #b91c1c;
+    --info-bg: #eff6ff;
+    --info-text: #1d4ed8;
+    --radius: 18px;
+    --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-top: #111827;
+        --bg-bottom: #0b1120;
+        --surface: #1a2233;
+        --surface-muted: #212a3c;
+        --text: #eef2f9;
+        --text-muted: #a4adc0;
+        --border: #313b52;
+        --shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+        --success-bg: #0d2b21;
+        --success-text: #7fe0b4;
+        --warning-bg: #33260a;
+        --warning-text: #f5cf7a;
+        --error-bg: #3a1518;
+        --error-text: #fca5a5;
+        --info-bg: #12233f;
+        --info-text: #a9c8ff;
+    }
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: linear-gradient(160deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+    background-attachment: fixed;
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+    /* Respect the safe area on notched phones. */
+    padding: 1.75rem max(1rem, env(safe-area-inset-left)) 2.5rem max(1rem, env(safe-area-inset-right));
+    display: flex;
+    justify-content: center;
+    -webkit-text-size-adjust: 100%;
+}
+
+.app-container {
+    width: 100%;
+    max-width: 640px;
+}
+
+/* ---------------------------------------------------------------- header --- */
+
+header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.logo-container {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    border-radius: 16px;
+    margin-bottom: 0.85rem;
+    box-shadow: 0 10px 22px rgba(99, 102, 241, 0.28);
+}
+
+.logo-icon {
+    width: 30px;
+    height: 30px;
+    color: #ffffff;
+}
+
+h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+header p {
+    color: var(--text-muted);
+    font-size: 1rem;
+    max-width: 34ch;
+    margin: 0.35rem auto 0;
+}
+
+/* ----------------------------------------------------------------- cards --- */
+
+.glass-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 1.25rem;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.fade-in {
+    animation: slideUpFade 0.35s ease both;
+}
+
+@keyframes slideUpFade {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fade-in { animation: none; }
+    * { scroll-behavior: auto !important; }
+}
+
+/* ------------------------------------------------------------------ form --- */
+
+.form-group {
+    margin-bottom: 1.1rem;
+}
+
+.form-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.form-row .form-group {
+    flex: 1 1 140px;
+}
+
+label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.4rem;
+}
+
+.required {
+    color: var(--primary);
+}
+
+textarea,
+input,
+select {
+    width: 100%;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-family: inherit;
+    /* 16px keeps mobile Safari from zooming when a field is focused. */
+    font-size: 1rem;
+    background-color: var(--surface-muted);
+    color: var(--text);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    min-height: 48px;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 116px;
+}
+
+textarea:focus,
+input:focus,
+select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px var(--focus);
+}
+
+input[aria-invalid='true'],
+select[aria-invalid='true'] {
+    border-color: var(--error-text);
+    background-color: var(--error-bg);
+}
+
+.field-help {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-top: 0.4rem;
+}
+
+/* --------------------------------------------------------------- buttons --- */
+
+button {
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    min-height: 48px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: transform 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:focus-visible,
+a:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.btn-gradient {
+    width: 100%;
+    margin-top: 0.75rem;
+    color: #ffffff;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    box-shadow: 0 8px 18px rgba(99, 102, 241, 0.25);
+}
+
+.btn-gradient:hover {
+    transform: translateY(-1px);
+}
+
+.btn-gradient:active {
+    transform: translateY(0);
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.section-header h2 {
+    font-size: 1.3rem;
+}
+
+.icon-btn {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    background: var(--surface-muted);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.icon-btn:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 1.25rem;
+}
+
+.action-btn {
+    width: 100%;
+    color: #ffffff;
+}
+
+.google-btn { background-color: #1a73e8; }
+.google-btn:hover { background-color: #1765cc; }
+.ics-btn { background-color: #334155; }
+.ics-btn:hover { background-color: #1e293b; }
+
+.share-btn.outline {
+    background-color: transparent;
+    color: var(--text);
+    border: 2px solid var(--border);
+}
+
+.share-btn.outline:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+/* -------------------------------------------------------------- messages --- */
+
+.notice,
+.status {
+    border-radius: 12px;
+    padding: 0.8rem 0.9rem;
+    font-size: 0.9rem;
+    margin-top: 0.9rem;
+}
+
+.notice {
+    margin-bottom: 0.5rem;
+}
+
+.status {
+    margin-top: 1.25rem;
+    border: 1px solid transparent;
+}
+
+.notice.info,
+.status.info {
+    background: var(--info-bg);
+    color: var(--info-text);
+}
+
+.notice.success,
+.status.success {
+    background: var(--success-bg);
+    color: var(--success-text);
+}
+
+.notice.warning,
+.status.warning {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+}
+
+.notice.error,
+.status.error {
+    background: var(--error-bg);
+    color: var(--error-text);
+}
+
+.disclosure {
+    margin-top: 1rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+footer {
+    margin-top: 0.5rem;
+    padding: 0 0.25rem;
+}
+
+footer p {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+    max-width: 46ch;
+    margin: 0 auto;
+}
+
+/* ------------------------------------------------------------ responsive --- */
+
+/* Tablets and small laptops: more room, so the actions sit side by side. */
+@media (min-width: 560px) {
+    body {
+        padding-top: 2.5rem;
+    }
+
+    .glass-card {
+        padding: 1.75rem;
+    }
+
+    h1 {
+        font-size: 2.25rem;
+    }
+
+    header p {
+        font-size: 1.05rem;
+    }
+
+    .action-buttons {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .action-btn {
+        flex: 1 1 180px;
+        width: auto;
+    }
+}
+
+/* Desktop: wider card, controls stay comfortably sized. */
+@media (min-width: 900px) {
+    .app-container {
+        max-width: 680px;
+    }
+
+    .logo-container {
+        width: 64px;
+        height: 64px;
+    }
+
+    .logo-icon {
+        width: 34px;
+        height: 34px;
+    }
+}
+
+/* Very small phones keep full-width actions but with tighter spacing. */
+@media (max-width: 380px) {
+    .glass-card {
+        padding: 1rem;
+    }
+
+    .form-row {
+        gap: 0.5rem;
+    }
+}
+
+/* Touch devices: no lift-on-hover surprises. */
+@media (hover: none) {
+    .btn-gradient:hover,
+    .google-btn:hover,
+    .ics-btn:hover,
+    .share-btn.outline:hover {
+        transform: none;
+    }
+}

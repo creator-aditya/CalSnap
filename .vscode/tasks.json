@@ -1,0 +1,73 @@
+{
+  // The task that F5 depends on: start the local static server in the background.
+  // Its output is what the "serverReadyAction" in launch.json watches for.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "serve: CalSnap",
+      "type": "shell",
+      "command": "node",
+      "args": ["tools/serve.js", "5173"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "calsnap-server",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "CalSnap is available at"
+        }
+      }
+    },
+    {
+      "label": "test: CalSnap (all suites)",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "--test",
+        "tests/extractor.test.js",
+        "tests/validation.test.js",
+        "tests/calendar.test.js",
+        "tests/ui.test.js",
+        "tests/workflow.test.js"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "sample: write and validate an .ics file",
+      "type": "shell",
+      "command": "node tools/make-sample.js && python tools/validate-ics.py tools/sample-event.ics",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

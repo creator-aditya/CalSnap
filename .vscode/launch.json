@@ -1,0 +1,67 @@
+{
+  // Press F5 in VS Code to launch CalSnap.
+  //
+  // CalSnap is plain HTML/CSS/JavaScript, so there is nothing to compile: the
+  // "build" step is simply serving the folder over HTTP (the service worker and
+  // the share target do not work from file://).
+  //
+  // "CalSnap: serve + open Chrome" starts tools/serve.js and points Chrome at it,
+  // and maps the served URLs back to this folder so breakpoints in js/*.js work.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "CalSnap: serve + open Chrome",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:5173/",
+      "webRoot": "${workspaceFolder}",
+      "sourceMapPathOverrides": {
+        "/js/*": "${workspaceFolder}/js/*"
+      },
+      "serverReadyAction": {
+        "action": "debugWithChrome",
+        "pattern": "CalSnap is available at (https?://\\S+)",
+        "uriFormat": "%s",
+        "webRoot": "${workspaceFolder}"
+      },
+      "preLaunchTask": "serve: CalSnap"
+    },
+    {
+      "name": "CalSnap: serve + open Edge",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://127.0.0.1:5173/",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "serve: CalSnap"
+    },
+    {
+      // The share target sends ?title=…&text=…&url=…, so a page refresh cannot
+      // reproduce it. This opens the app exactly as a shared page would.
+      "name": "CalSnap: open a simulated shared link",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:5173/index.html?text=Annual%20Design%20Summit%0A2026-03-14%20at%209%3A30%20AM%20-%204%3A00%20PM%0ALocation%3A%20Riverside%20Centre&url=https%3A%2F%2Fexample.com%2Fsummit",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "serve: CalSnap"
+    },
+    {
+      // Debug the Node test suites. Open the test file first, then press F5 and
+      // pick this configuration; breakpoints work inside js/extractor.js and
+      // friends because the tests load the very same files.
+      "name": "Tests: debug the open test file",
+      "type": "node",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Tests: all suites (no debugger)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/tests/workflow.test.js",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}

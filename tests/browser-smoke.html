@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!--
+        Browser smoke test: loads the real application modules in a real browser,
+        runs the documented workflow and prints the outcome as JSON so the result
+        can be read from a headless run.
+
+        This file is a test fixture, not part of the application.
+    -->
+    <title>CalSnap browser smoke test</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header><h1>CalSnap browser smoke test</h1></header>
+        <main>
+            <section id="input-section" class="glass-card">
+                <label for="raw-text">Event text</label>
+                <textarea id="raw-text" rows="5"></textarea>
+                <button id="btn-extract" type="button"><span id="btn-text">Extract Event Details</span></button>
+                <p id="extraction-notice" class="notice hidden"></p>
+            </section>
+
+            <section id="review-section" class="glass-card hidden">
+                <button id="btn-back" type="button">back</button>
+                <p id="extraction-hint" class="notice hidden"></p>
+                <form id="event-form">
+                    <input type="text" id="event-title">
+                    <input type="date" id="event-date">
+                    <input type="time" id="event-start">
+                    <input type="time" id="event-end">
+                    <input type="text" id="event-location">
+                    <textarea id="event-desc"></textarea>
+                    <select id="event-reminder">
+                        <option value="none">No reminder</option>
+                        <option value="15">15 minutes before</option>
+                        <option value="60">1 hour before</option>
+                        <option value="1440">1 day before</option>
+                    </select>
+                </form>
+                <button id="btn-google" type="button">Open Google Calendar</button>
+                <button id="btn-ics" type="button">Download .ics file</button>
+                <button id="btn-share" type="button">Share event details</button>
+            </section>
+        </main>
+        <div id="status" class="status hidden"></div>
+    </div>
+
+    <script src="../js/extractor.js"></script>
+    <script src="../js/validation.js"></script>
+    <script src="../js/calendar.js"></script>
+    <script src="../js/ui.js"></script>
+    <script>
+        // The smoke test drives the modules directly as well as through the UI.
+        window.addEventListener('load', function () {
+            var results = {};
+
+            // 1. Modules loaded.
+            results.modules = {
+                extractor: typeof Extractor === 'object',
+                validation: typeof Validation === 'object',
+                calendar: typeof CalendarCore === 'object'
+            };
+
+            // 2. UI wiring: type text, press the button, read the form.
+            var text = [
+                'Annual Design Summit 2026',
+                'Saturday, 14 March 2026',
+                'Time: 9:30 AM - 4:00 PM',
+                'Location: Riverside Convention Centre, Hall B',
+                'Join 300 designers for a day of talks.'
+            ].join('\n');
+
+            document.getElementById('raw-text').value = text;
+            document.getElementById('btn-extract').click();
+
+            results.form = {
+                title: document.getElementById('event-title').value,
+                date: document.getElementById('event-date').value,
+                start: document.getElementById('event-start').value,
+                end: document.getElementById('event-end').value,
+                location: document.getElementById('event-location').value,
+                reviewVisible: !document.getElementById('review-section').classList.contains('hidden'),
+                inputHidden: document.getElementById('input-section').classList.contains('hidden'),
+                notice: document.getElementById('extraction-notice').textContent.slice(0, 60)
+            };
+
+            // 3. Google Calendar link, opened in a new tab by the button.
+            document.getElementById('event-reminder').value = '15';
+            var opened = [];
+            var realOpen = window.open;
+            window.open = function (url) { opened.push(String(url)); return { closed: false }; };
+            document.getElementById('btn-google').click();
+            window.open = realOpen;
+
+            results.googleUrl = opened[0] || null;
+            results.googleStatus = document.getElementById('status').textContent.slice(0, 120);
+
+            // 4. .ics document for the same event.
+            var validated = Validation.validate({
+                title: document.getElementById('event-title').value,
+                date: document.getElementById('event-date').value,
+                startTime: document.getElementById('event-start').value,
+                endTime: document.getElementById('event-end').value,
+                location: document.getElementById('event-location').value,
+                description: document.getElementById('event-desc').value,
+                reminder: '15'
+            });
+            results.validationOk = validated.ok;
+            var icsText = CalendarCore.generateICS(validated.event);
+            results.ics = {
+                begins: icsText.indexOf('BEGIN:VCALENDAR') === 0,
+                crlf: icsText.indexOf('\r\n') > 0,
+                hasAlarm: icsText.indexOf('TRIGGER:-PT15M') > 0,
+                summary: (icsText.match(/SUMMARY:(.*)/) || [])[1],
+                maxLineOctets: Math.max.apply(null, icsText.split('\r\n').map(function (line) {
+                    return new Blob([line]).size;
+                }))
+            };
+
+            // 5. Validation blocks an empty form.
+            results.blockedEmptyForm = Validation.validate({ title: '', date: '', startTime: '', reminder: 'none' }).ok === false;
+
+            // 6. Web Share API availability in this browser.
+            results.hasWebShare = typeof navigator.share === 'function';
+
+            var target = document.createElement('pre');
+            target.id = 'smoke-results';
+            target.textContent = 'SMOKE_RESULTS=' + JSON.stringify(results);
+            document.body.appendChild(target);
+        });
+    </script>
+</body>
+</html>

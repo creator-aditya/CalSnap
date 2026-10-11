@@ -1,0 +1,7 @@
+{
+  // Only suggestions: VS Code's built-in JavaScript debugger and the Node.js
+  // runtime are all CalSnap needs, so nothing here is required.
+  "recommendations": [
+    "ms-vscode.live-server"
+  ]
+}

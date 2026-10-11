@@ -1,0 +1,27 @@
+{
+  // CalSnap is a browser application with no build step, so the useful settings
+  // are about consistent editing rather than tooling.
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.exclude": {
+    "**/node_modules": true
+  },
+  "search.exclude": {
+    "**/node_modules": true
+  },
+  "editor.tabSize": 4,
+  "editor.rulers": [100],
+  "[html]": {
+    "editor.tabSize": 4
+  },
+  "[css]": {
+    "editor.tabSize": 4
+  },
+  "[json]": {
+    "editor.tabSize": 2
+  },
+  "[markdown]": {
+    "editor.tabSize": 2
+  }
+}

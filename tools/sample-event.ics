@@ -1,0 +1,24 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//CalSnap//Smart Event Saver//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:CalSnap
+BEGIN:VEVENT
+UID:annual-design-summit-2026-mv3h6ohf-m1hdku59@calsnap
+DTSTAMP:20261011T070206Z
+DTSTART:20260314T040000Z
+DTEND:20260314T103000Z
+SUMMARY:Annual Design Summit 2026
+LOCATION:Riverside Convention Centre\, Hall B
+DESCRIPTION:Annual Design Summit 2026\nSaturday\, 14 March 2026\nTime: 9:30
+  AM - 4:00 PM\nLocation: Riverside Convention Centre\, Hall B\n\nJoin 300 
+ designers for a day of talks\, workshops and portfolio reviews.\nTickets a
+ nd the full agenda: https://example.com/summit-2026
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:15 minutes before: Annual Design Summit 2026
+END:VALARM
+END:VEVENT
+END:VCALENDAR

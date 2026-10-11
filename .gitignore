@@ -1,0 +1,19 @@
+# Nothing here is required to run CalSnap; these are editor/OS leftovers.
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors.
+# .vscode is deliberately NOT ignored: launch.json and tasks.json are how this
+# project is meant to be run (press F5), and they contain no machine-specific paths.
+.idea/
+*.swp
+*.code-workspace
+
+# Node (there are no runtime dependencies, but keep the folder out of the repo)
+node_modules/
+npm-debug.log*
+
+# Local test and tool output
+*.local
+tests/.tmp/
