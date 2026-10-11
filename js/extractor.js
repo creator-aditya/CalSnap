@@ -517,15 +517,33 @@
             return '';
         },
 
-        /** Reject candidates that are really a date or a time. */
+        /**
+         * Is this candidate really just a date or a time, rather than a name?
+         *
+         * The dependable test is whether anything name-like survives once the date
+         * and time phrases are removed:
+         *
+         *   "Thursday, November 12, 2026, from 09:00 AM to 05:00 PM"  -> date only
+         *   "on 2026-05-01 at 10:00"                                  -> time only
+         *   "Webinar 2026-04-08 15:00"                                -> keeps "Webinar"
+         *
+         * Only candidates without a sentence break are treated as possible
+         * timestamps, so a long paragraph that merely mentions a time is never
+         * mistaken for one.
+         */
         looksLikeDateTime: function (value) {
             var trimmed = String(value).trim();
             if (!trimmed) return true;
-            if (/^\d/.test(trimmed) && trimmed.split(/\s+/).length <= 2) return true;
-            if (new RegExp('^(?:' + MONTH_PATTERN + ')\\b', 'i').test(trimmed)) return true;
-            if (WEEKDAYS[trimmed.toLowerCase().split(/\s+/)[0]] !== undefined) return true;
-            if (/\b(?:am|pm)\b/i.test(trimmed)) return true;
-            return false;
+            if (trimmed.length > 120 || /[.!?]\s/.test(trimmed)) return false;
+
+            var left = this.stripEmbeddedDateAndTime(trimmed)
+                .replace(/\b(?:at|on|in|from|to|by|for|with|of|the|a|an|and|until|till|starting|between)\b/gi, ' ')
+                .replace(/\d+(?:st|nd|rd|th)?/gi, ' ') // stray day numbers, years, clock digits
+                .replace(/[^A-Za-z]+/g, '');
+            // Fewer than three letters left means the candidate was a timestamp, not
+            // a name: "Webinar 2026-04-08 15:00" keeps "Webinar", while
+            // "Friday, 18 December 2026, 7:00 PM" keeps nothing.
+            return left.length <= 2;
         },
 
         cleanLocation: function (value) {
@@ -611,6 +629,90 @@
             return value.replace(/\s*[-–—|]\s*$/, '').trim();
         },
 
+        /**
+         * Remove a date/time phrase that sits inside a sentence, e.g.
+         * "... will take place on Thursday, November 12, 2026, from 09:00 AM to
+         * 05:00 PM IST (with registration opening early at 08:15 AM). This ..."
+         * -> "... will take place on . This ..."
+         *
+         * Only reached for long, sentence-like candidates, so a genuine title such
+         * as "April 22 Planning" is never touched.
+         */
+        stripEmbeddedDateAndTime: function (value) {
+            var months = '(?:' + MONTH_PATTERN + ')';
+            var day = '\\d{1,2}(?:st|nd|rd|th)?';
+            var year = '(?:,?\\s+\\d{4})';
+            var time = '\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)';
+            var out = String(value);
+
+            // "(with registration opening early at 08:15 AM)" and similar asides
+            out = out.replace(/\s*\([^()]{0,160}?(?:\d{1,2}:\d{2}|\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?))[^()]{0,80}?\)/gi, ' ');
+
+            var monthDay = new RegExp('(?:\\bon\\s+)?(?:[A-Z][a-z]+,\\s+)?' + months + '\\.?\\s+' + day + '(?:' + year + ')?', 'gi');
+            var dayMonth = new RegExp('(?:\\bon\\s+)?' + day + '\\s+(?:of\\s+)?' + months + '\\.?(?:' + year + ')?', 'gi');
+            var isoDate = /\b\d{4}-\d{1,2}-\d{1,2}\b/g;
+            var numericDate = /\b\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}\b/g;
+            var range = new RegExp('(?:,?\\s*(?:from|between)\\s+)?' + time + '\\s*(?:-|–|—|to|until|till|thru|through)\\s*' + time + '(?:\\s*[A-Z]{2,4}\\b)?', 'gi');
+            // Standalone clock times, with or without a leading "at"/"from".
+            var single = new RegExp('(?:,?\\s*(?:starting\\s+)?(?:at|from)\\s+)?' + time, 'gi');
+
+            [monthDay, dayMonth, isoDate, numericDate, range, single].forEach(function (pattern) {
+                out = out.replace(pattern, ' ');
+            });
+
+            // A bare weekday that is left over belongs to the date that was removed
+            // ("Friday, 18 December 2026" -> "Friday,"), not to the event name.
+            out = out.replace(/\b(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi, ' ');
+
+            return out.replace(/\s{2,}/g, ' ').trim();
+        },
+
+        /**
+         * Drop a date/time fragment left dangling at the end of a name:
+         *   "Q3 2026 Planning on 2026-10-01" -> "Q3 2026 Planning"
+         *   "Team sync at 09:00"             -> "Team sync"
+         */
+        trimDanglingDate: function (text) {
+            var value = String(text);
+            var fragment = '(?:\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[\\/.]\\d{1,2}[\\/.]\\d{2,4}|(?:' + MONTH_PATTERN +
+                ')\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?))';
+            for (var pass = 0; pass < 3; pass++) {
+                var before = value;
+                value = value
+                    .replace(new RegExp('[\\s,;:–—-]+(?:on|at|from|to|by|in|until|till|starting|between)?\\s*' + fragment + '[\\s,;:–—-]*$', 'i'), '')
+                    .replace(/[\s,;:.!?–—-]+$/, '')
+                    .replace(/\s+(?:on|at|in|from|to|by|for|with|of|the|a|an|and|until|till|starting|between)$/i, '')
+                    .replace(/[\s,;:.!?–—-]+$/, '');
+                if (value === before) break;
+            }
+            return value.trim();
+        },
+
+        /** Words that mean "the real name has already ended here". */
+        TITLE_CUT_PATTERN: /[\s,;:–—-]+(?:will\s+(?:take\s+place|be\s+held|be\s+hosted|happen|start|begin|run|kick\s+off)|is\s+(?:taking\s+place|being\s+held|happening|scheduled|hosted|organised|organized|back)|takes\s+place|hosted\s+by|presented\s+by|organised\s+by|organized\s+by|brought\s+to\s+you\s+by|in\s+partnership\s+with|where\s+|which\s+|\bthat\s+|\bthis\s+|\bjoin\s+us\b|\bcome\s+|\battend\b|\bregister\b|\bplease\b|\btickets\b|\bfor\s+more\s+information\b|\bfor\s+details\b)/i,
+        /**
+         * Trim a paragraph down to the event name: drop an embedded date/time, then
+         * cut at the first clause that talks about the event rather than naming it.
+         */
+        trimToTitle: function (value) {
+            var text = String(value).trim();
+            if (text.length <= 40) return this.trimDanglingDate(text);
+
+            text = this.stripEmbeddedDateAndTime(text).replace(/\s{2,}/g, ' ').trim();
+
+            var cut = text.search(this.TITLE_CUT_PATTERN);
+            if (cut > 1) text = text.slice(0, cut);
+
+            text = text.split(/[.!?]\s+/)[0];
+            // A long candidate with no sentence break is better cut at the first
+            // comma than shown as a wall of text.
+            if (text.length > 90 && text.indexOf(',') > 8) {
+                text = text.slice(0, text.indexOf(','));
+            }
+
+            return this.trimDanglingDate(text);
+        },
+
         cleanTitle: function (value) {
             if (!value) return '';
             var title = String(value)
@@ -618,6 +720,7 @@
                 .replace(/[\s>*_\-–—•|]+$/, '')
                 .replace(/\s{2,}/g, ' ')
                 .trim();
+            title = this.trimToTitle(title);
             title = title.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
             if (title.length < 2) return '';
             if (title.length > 140) title = title.slice(0, 140).trim();

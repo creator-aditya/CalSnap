@@ -383,6 +383,23 @@ The interface is mobile-first and adapts at 560 px and 900 px:
   not a greeting, a label, a link or a bare date; a link-only share falls back to the
   URL slug.
 
+Because text shared from a web page usually arrives as one long paragraph, a title is
+also pulled out of a sentence. The date and time are removed, then the name is cut at
+the first clause that describes the event:
+
+```text
+The NextGen AI & Tech Summit 2026 will take place on Thursday, November 12, 2026,
+from 09:00 AM to 05:00 PM IST (with registration opening early at 08:15 AM). This
+premier industry event, hosted by ...
+        |
+        v  title: "The NextGen AI & Tech Summit 2026"
+           date: 2026-11-12   start: 09:00   end: 17:00
+```
+
+A candidate that contains nothing but a date or time (`9:30 AM`, `Friday, 18 December
+2026`) is still refused rather than used as a name, while a real name that happens to
+contain digits (`Q3 2026 Planning`) is kept.
+
 Deliberate limitations:
 
 * An unknown **end time** stays empty. The form says the event will be created one hour

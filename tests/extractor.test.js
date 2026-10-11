@@ -219,6 +219,75 @@ test('full workflow example produces every field', () => {
     assert.deepEqual(result.missing, []);
 });
 
+/*
+ * Regression: text shared from a web page arrives as ONE long paragraph, with the
+ * event name embedded in the middle of a sentence. An earlier build rejected any
+ * candidate containing "AM"/"PM" as if it were a timestamp, so the whole paragraph
+ * was discarded and the user saw "No event title could be found" for text that
+ * plainly contained the name.
+ */
+test('paragraph: a single-block page description still yields a title', () => {
+    const paragraph = 'The NextGen AI & Tech Summit 2026 will take place on Thursday, November 12, 2026, ' +
+        'from 09:00 AM to 05:00 PM IST (with registration opening early at 08:15 AM). This premier industry ' +
+        'event, hosted by the Nexus Innovations Group, will be held at The Grand Ballroom inside the ITC Grand ' +
+        'Chola, located at No. 63, Anna Salai, Guindy, Chennai, Tamil Nadu, 600032. Attendees can look forward ' +
+        'to a full day of keynote speeches, interactive panel discussions, and structured networking sessions.';
+
+    const result = extract(paragraph);
+
+    assert.equal(result.title, 'The NextGen AI & Tech Summit 2026');
+    assert.equal(result.date, '2026-11-12');
+    assert.equal(result.startTime, '09:00');
+    assert.equal(result.endTime, '17:00');
+    assert.equal(result.location, 'The Grand Ballroom');
+    assert.deepEqual(result.missing, [], 'nothing should be reported missing for this text');
+});
+
+test('paragraph: the title is trimmed at the first clause that describes the event', () => {
+    const result = extract('Join us for the Riverside Summer Gala, which will take place on 2026-07-18 at 19:00. ' +
+        'Dinner, music and a charity auction follow.');
+    assert.equal(result.title, 'Join us for the Riverside Summer Gala');
+    assert.equal(result.date, '2026-07-18');
+    assert.equal(result.startTime, '19:00');
+});
+
+test('paragraph: an aside in brackets does not leak into the title', () => {
+    const result = extract('Winter Concert will take place on Friday, 18 December 2026, 7:00 PM ' +
+        '(doors open at 06:30 PM). Tickets include a welcome drink.');
+    assert.equal(result.title, 'Winter Concert');
+    assert.equal(result.date, '2026-12-18');
+    assert.equal(result.startTime, '19:00');
+});
+
+test('paragraph: a long name is kept, not truncated at a comma or date', () => {
+    const title = 'Quarterly Cross-Functional Planning and Retrospective Workshop for Platform Teams';
+    const result = extract(title + ' takes place on 2026-09-04 at 14:00 in Room 4.');
+    assert.equal(result.title, title);
+    assert.equal(result.date, '2026-09-04');
+    assert.equal(result.startTime, '14:00');
+});
+
+test('title: a name that merely contains digits is not mistaken for a timestamp', () => {
+    // Guards the opposite failure: rejecting real names because they hold a date.
+    // A short line keeps its date (the user can trim it); the point is that the
+    // name survives and the date is still picked up as the date.
+    const short = extract('Webinar 2026-04-08 15:00');
+    assert.ok(short.title.startsWith('Webinar'), 'the name must survive, got: ' + JSON.stringify(short.title));
+    assert.equal(short.date, '2026-04-08');
+    assert.equal(short.startTime, '15:00');
+
+    assert.equal(extract('Q3 2026 Planning on 2026-10-01 at 09:00').title, 'Q3 2026 Planning');
+    assert.equal(extract('Annual Design Summit 2026').title, 'Annual Design Summit 2026');
+});
+
+test('title: a candidate that is only a date or time is still refused', () => {
+    // These must never become the event name.
+    assert.equal(extract('9:30 AM').title, '');
+    assert.equal(extract('2026-03-15').title, '');
+    assert.equal(extract('Friday, 18 December 2026, 7:00 PM').title, '');
+    assert.equal(extract('on 2026-05-01 at 10:00').title, '');
+});
+
 test('extraction is pure: the same input always gives the same output', () => {
     const text = 'Studio Session\n2026-06-10 at 19:00\nLocation: Blue Note';
     assert.deepEqual(extract(text), extract(text));
