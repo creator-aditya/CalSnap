@@ -17,7 +17,7 @@
      * browser is running a cached copy of the code - see the README section on
      * updating a deployed copy.
      */
-    var APP_VERSION = '1.0.3';
+    var APP_VERSION = '1.1.0';
 
     var SHARED_PARAM_NAMES = ['text', 'title', 'url', 'share', 'description'];
     var TEXT_FIELDS = ['title', 'date', 'start', 'end', 'location', 'description'];
@@ -103,6 +103,68 @@
             return { text: parts.join('\n'), fromShare: true };
         }
 
+        /**
+         * Read the page behind a link, then extract from it.
+         *
+         * A browser cannot read another origin's page (CORS, and many event sites
+         * answer 403 anyway), so UrlFetch tries several routes and reports honestly
+         * when every one fails instead of pretending the page was read.
+         */
+        function runUrlExtraction(url) {
+            var button = el.btnExtract;
+            var originalLabel = el.btnText.textContent;
+            button.disabled = true;
+            el.btnText.textContent = 'Reading the page...';
+            showNotice(el.extractionNotice, 'Fetching ' + url + ' ...', 'info');
+
+            return UrlFetch.load(url).then(function (result) {
+                if (!result.ok) {
+                    showNotice(el.extractionNotice, result.reason, 'warning');
+                    return;
+                }
+
+                var page = result.page || {};
+                var pageText = page.text || '';
+                // The title is worth keeping even when the body is thin, so it is
+                // prepended: the extractor then sees a line it can use as the name.
+                var combined = (page.title ? page.title + '\n' : '') + pageText;
+                var extracted = Extractor.extract(combined, { page: page });
+
+                if (!extracted || (!extracted.title && !extracted.date)) {
+                    showNotice(el.extractionNotice,
+                        'The page was reached but no event details could be read from it. ' +
+                        'Open the page, copy the event text and paste it here instead.',
+                        'warning');
+                    return;
+                }
+
+                fillForm(extracted);
+                showReview();
+                showHint(extracted);
+
+                var found = [];
+                if (extracted.title) found.push('title');
+                if (extracted.date) found.push('date');
+                if (extracted.startTime) found.push('start time');
+                if (extracted.location) found.push('location');
+
+                showNotice(el.extractionNotice,
+                    'Details read from the page (' + found.join(', ') + '). The page was fetched by ' +
+                    (result.route === 'direct' ? 'your browser.' : 'an external text service, which received the link.') +
+                    ' Check every field before continuing.',
+                    extracted.missing.length ? 'warning' : 'success');
+
+                (extracted.missing.length ? el.form : el.title).focus();
+            }).catch(function () {
+                showNotice(el.extractionNotice,
+                    'The page could not be read. Copy the event text and paste it here instead.',
+                    'warning');
+            }).then(function () {
+                button.disabled = false;
+                el.btnText.textContent = originalLabel;
+            });
+        }
+
         function runExtraction() {
             var text = el.rawText.value;
             // Never leave a message from an earlier attempt on screen.
@@ -111,8 +173,14 @@
             clearFieldMarks();
 
             if (!text.trim()) {
-                showNotice(el.extractionNotice, 'Paste some event text first, then choose Extract Event Details.', 'error');
+                showNotice(el.extractionNotice, 'Paste some event text or a link first, then choose Extract Event Details.', 'error');
                 el.rawText.focus();
+                return;
+            }
+
+            // A link on its own is read from the web instead of being given up on.
+            if (UrlFetch.looksLikeUrl(text) && Extractor.urlOnlyFeedback(text)) {
+                runUrlExtraction(UrlFetch.normalizeUrl(text));
                 return;
             }
 
@@ -135,8 +203,8 @@
                 showNotice(el.extractionNotice, urlOnly.message, 'warning');
             } else if (extracted.urls.length) {
                 showNotice(el.extractionNotice,
-                    'Details extracted. A link was shared as well, but CalSnap does not open web pages, so ' +
-                    'everything below comes from your text - check it before continuing.',
+                    'Details extracted. A link was shared as well, but the details below come from your ' +
+                    'text - check them before continuing.',
                     'info');
             } else {
                 showNotice(el.extractionNotice,

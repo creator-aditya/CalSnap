@@ -40,7 +40,8 @@
         "tests/calendar.test.js",
         "tests/ui.test.js",
         "tests/workflow.test.js",
-        "tests/paragraph.test.js"
+        "tests/paragraph.test.js",
+        "tests/urlfetch.test.js"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

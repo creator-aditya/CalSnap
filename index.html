@@ -45,8 +45,9 @@
                         placeholder="e.g. Team meeting tomorrow at 2 PM at the Main Office"
                         aria-describedby="input-help"></textarea>
                     <p id="input-help" class="field-help">
-                        Paste the event text you copied from a website, email or message - or share a page to CalSnap
-                        from your phone's Share menu.
+                        Paste the event text you copied from a website, email or message - or paste the
+                        <strong>link</strong> to an event page, or share a page to CalSnap from your phone's
+                        Share menu.
                     </p>
                 </div>
 
@@ -143,7 +144,8 @@
         </footer>
     </div>
 
-    <!-- Extraction, validation and calendar logic are kept separate from the interface. -->
+    <!-- Extraction, validation, URL reading and calendar logic are kept separate from the interface. -->
+    <script src="js/urlfetch.js"></script>
     <script src="js/extractor.js"></script>
     <script src="js/validation.js"></script>
     <script src="js/calendar.js"></script>

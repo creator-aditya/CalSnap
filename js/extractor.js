@@ -97,12 +97,19 @@
          * @param {Date}   [options.now] Reference "now", used to resolve relative
          *                               dates such as "tomorrow". Defaults to the
          *                               real current time; tests pass a fixed one.
+         * @param {object} [options.page] Structured data from a fetched web page
+         *                               (see js/urlfetch.js parseHtml): title,
+         *                               startDate, endDate, location, description.
+         *                               Values published by the page in schema.org
+         *                               JSON-LD are exact, so they win over anything
+         *                               guessed from the visible text.
          * @returns {null|object} null when there is no usable text at all.
          */
         extract: function (text, options) {
             if (typeof text !== 'string' || text.trim() === '') return null;
 
             var now = (options && options.now instanceof Date) ? options.now : new Date();
+            var page = (options && options.page) || null;
             var normalized = this.normalizeText(text);
             var lines = normalized.split('\n').map(function (line) {
                 return line.trim();
@@ -144,10 +151,150 @@
                 startTime: timeInfo.startMatched || '',
                 endTime: timeInfo.endMatched || '',
                 location: location ? 'text' : '',
-                relative: parsedDate ? !!parsedDate.relative : false
+                relative: parsedDate ? !!parsedDate.relative : false,
+                fromLabel: !!labeledTitle,
+                dateFromText: !!parsedDate,
+                timeFromText: !!timeInfo.start,
+                locationFromText: !!location
             };
 
+            if (page) this.applyPageData(details, page, now, !!labeledTitle);
+
             details.missing = this.findMissing(details);
+            return details;
+        },
+
+        /**
+         * Overlay what the page itself declared.
+         *
+         * A page's own JSON-LD (schema.org Event) is authoritative: it is the event's
+         * real start and end, not an interpretation of a sentence. It only fills a
+         * field, never overwrites a value the text already gave, and a date that is a
+         * run ("Sat 14 Nov 2026 - Sat 9 Jan 2027") still leaves the time for the user.
+         */
+        applyPageData: function (details, page, now, hasLabeledTitle) {
+            var self = this;
+
+            /** "2026-11-14T19:00:00+05:30" or "2026-11-14" -> local date and time parts. */
+            var splitStamp = function (value) {
+                var match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+                if (!match) return null;
+                var local = new Date(
+                    parseInt(match[1], 10), parseInt(match[2], 10) - 1, parseInt(match[3], 10),
+                    match[4] ? parseInt(match[4], 10) : 0, match[5] ? parseInt(match[5], 10) : 0, 0, 0
+                );
+                if (isNaN(local.getTime())) return null;
+                return {
+                    date: self.formatDate(local),
+                    time: match[4] ? self.to24Hour(match[4], match[5]) : '',
+                    hasTime: !!match[4]
+                };
+            };
+
+            var starts = splitStamp(page.startDate);
+
+            // A reader page states its facts as plain text instead of structured data:
+            // "Sat 14 Nov 2026 - Sat 9 Jan 2027" and "7:00 PM". Those are exact, so they
+            // are used before the general text scan, which navigation can mislead.
+            if (!starts && page.dateText) {
+                var fromFacts = this.findDate(page.dateText, now);
+                if (fromFacts) {
+                    starts = { date: this.formatDate(fromFacts.date), time: '', hasTime: false };
+                    details.sources.dateFromPageFacts = true;
+                }
+            }
+            if (starts && !details.startTime && page.timeOfDay) {
+                var pageTime = this.parseTime(String(page.timeOfDay).trim());
+                if (pageTime || /^midnight$/i.test(String(page.timeOfDay).trim())) {
+                    details.startTime = this.to24Hour(Math.floor(pageTime / 60), pageTime % 60);
+                    details.sources.startTime = 'page';
+                }
+            }
+
+            var ends = splitStamp(page.endDate);
+            if (ends && !details.endTime && ends.hasTime && ends.date === (details.date || (starts && starts.date))) {
+                details.endTime = ends.time;
+                details.sources.endTime = 'page';
+            } else if (ends && starts && !details.endTime && ends.hasTime) {
+                // An end on a later day: the .ics and Google Calendar both need it.
+                details.endDate = ends.date;
+                details.endTime = ends.time;
+                details.endNextDay = true;
+                details.sources.endTime = 'page';
+            }
+
+            // Title ranking, strongest first:
+            //   1. a label the user's own text carries ("Event: Design Review")
+            //   2. the title the page published (og:title / schema.org name), which is
+            //      written for the event and cannot pick up page navigation
+            //   3. the first usable line of text, stripped of any embedded date
+            //      ("Winter Craft Fair 5" from a page is why 2 outranks 3)
+            if (page.title && String(page.title).trim().length >= 3) {
+                var publishedTitle = String(page.title).trim();
+                if (!hasLabeledTitle) {
+                    details.title = publishedTitle;
+                    details.sources.title = 'page';
+                    // The "label" the line scanner found was the reader's own "Title:"
+                    // preamble, not the user naming the event, so a date the user typed
+                    // must not lose to the page's date on the strength of it.
+                    details.sources.fromLabel = false;
+                } else {
+                    // The user's text named the event explicitly; keep that name but
+                    // note that the page agreed on something.
+                    details.sources.pageTitle = publishedTitle;
+                }
+            }
+
+            // Date precedence, decided after the title: what the page states beats what a
+            // sentence scan guessed, because a page is full of dates that are not the
+            // event (a banner image timestamp supplied 2026-10-11 for a November show).
+            // A date the user labelled by hand is never overridden.
+            if (starts) {
+                var pageDateWins = !details.date || (details.sources.dateFromText && !details.sources.fromLabel);
+                if (pageDateWins) {
+                    details.date = starts.date;
+                    details.sources.date = 'page';
+                    details.sources.dateFromText = false;
+                }
+                if (!details.startTime && starts.hasTime) {
+                    details.startTime = starts.time;
+                    details.sources.startTime = 'page';
+                }
+            }
+
+            // A venue the page states ("Sophia Bhabha Auditorium, Mumbai") is a real
+            // place; a phrase read out of page text can be navigation ("Kochi Book Your
+            // Calender Events happening"). The page value wins when the text one looks
+            // like noise rather than a venue.
+            if (page.location && details.sources.locationFromText) {
+                var textLocation = String(details.location || '');
+                var looksLikeNoise = !/\b(?:club|hall|centre|center|theatre|theater|auditorium|arena|stadium|park|rooms?|office|studio|gallery|museum|library|hotel|restaurant|cafe|bar|lounge|auditorium|convention|academy|campus|school|college|university|gardens?|palace|mill|rooftop)\b/i.test(textLocation) ||
+                    textLocation.split(/\s+/).length > 8 ||
+                    /(?:https?|\]\(|happening|calender|calendar|today|tomorrow|sign in)/i.test(textLocation);
+                if (looksLikeNoise) {
+                    details.location = page.location;
+                    details.sources.location = 'page';
+                }
+            } else if (page.location && !details.location) {
+                details.location = page.location;
+                details.sources.location = 'page';
+            }
+
+            // The page's own write-up is written for the event, so it is a better calendar
+            // description than page furniture. It replaces the text when that text is
+            // clearly a page capture rather than the user's own words.
+            if (page.description && page.description.length >= 40 && details.description.length > 200) {
+                details.description = page.description;
+                details.sources.description = 'page';
+            }
+
+            // Last resort for a link input: keep only the opening of a long page capture,
+            // so the calendar entry does not carry every menu on the page.
+            if (details.description.length > 900 && !page.description) {
+                details.description = details.description.slice(0, 900).trim() + '...';
+            }
+
+            details.pageSource = page.source || '';
             return details;
         },
 
@@ -586,6 +733,20 @@
                 if (candidate) return candidate;
             }
 
+            // A venue often sits on its own line, with no "at" or "in" in front of it:
+            // "The Comedy Club, Mumbai". It must name a kind of place, which keeps
+            // category lines such as "Stand up Comedy, Comedy Shows" out.
+            var venueWords = /\b(?:club|hall|centre|center|theatre|theater|auditorium|arena|stadium|ground|grounds|park|room|rooms|office|studio|gallery|museum|library|hotel|resort|restaurant|cafe|café|bar|pub|lounge|mall|convention|academy|institute|campus|school|college|university|church|temple|mosque|marina|pavilion|gardens?|palace|castle|mill|warehouse|loft|rooftop|banquet|amphitheatre|amphitheater)\b/i;
+            for (var v = 0; v < lines.length; v++) {
+                var venueLine = lines[v].replace(/^[#*>\s-]+/, '').trim();
+                if (!/,\s*[A-Z]/.test(venueLine)) continue;
+                if (venueLine.length > 80 || venueLine.split(/\s+/).length > 8) continue;
+                if (/\d{1,2}:\d{2}|[.!?]|\b(?:at|on|from|until)\b/i.test(venueLine)) continue;
+                if (!venueWords.test(venueLine)) continue;
+                var venueCandidate = this.cleanLocation(venueLine);
+                if (venueCandidate) return venueCandidate;
+            }
+
             return '';
         },
 
@@ -637,6 +798,14 @@
             if (cleaned.length < 2 || cleaned.length > 120) return '';
             if (this.looksLikeDateTime(cleaned)) return '';
             if (/^(?:the\s+)?(?:event|meeting|us|it|this|that|noon|midnight)$/i.test(cleaned)) return '';
+            // A place has a place word or reads as a proper name. This keeps descriptive
+            // prose out: a page about a domain once supplied "documentation examples
+            // without needing permission" as the venue.
+            var placeWord = /\b(?:club|hall|centre|center|theatre|theater|auditorium|arena|stadium|grounds?|park|rooms?|office|studio|gallery|museum|library|hotel|resort|restaurant|cafe|café|bar|pub|lounge|mall|convention|academy|institute|campus|school|college|university|church|temple|mosque|marina|pavilion|gardens?|palace|mill|warehouse|rooftop|banquet|society|sabha|bhavan|bhawan|kendra|maidan|building|tower|plaza|street|road|avenue|lane|square|city|nagar|puram|colony|sector|airport|station|campus)\b/i;
+            var looksProper = /(?:^|[\s,(])[A-Z]/.test(cleaned) &&
+                cleaned.split(/\s+/).length <= 6 &&
+                !/\b(?:without|needing|permission|available|visit|learn|read|find|use|using|see|about|here|more)\b/i.test(cleaned);
+            if (!placeWord.test(cleaned) && !looksProper) return '';
             return cleaned;
         },
 

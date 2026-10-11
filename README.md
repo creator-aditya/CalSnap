@@ -20,8 +20,8 @@ nothing uploaded.
 | Downloadable `.ics` file with reminder (`VALARM`) | **Works** |
 | Native share sheet from the device (Web Share API) | **Works** on Android browsers and iOS Safari; otherwise CalSnap copies the details to the clipboard |
 | Receiving a share from another app (the Chrome/Android "Share → CalSnap" entry) | **Works only after the app is installed** as a PWA through the `share_target` manifest entry |
-| Reading a shared **link's** page content | **Not possible from the browser** (cross-origin restrictions). CalSnap says so instead of guessing |
-| Android share intent / iOS Share Extension (appearing in the system share sheet from any app, without installing the PWA) | **Requires native integration** — the plan is in [section 8](#8-platform-specific-sharing-what-still-needs-native-work) |
+| Reading an event page from a pasted **link** | **Works for many sites, not all.** A page that publishes schema.org Event data is read exactly; a page that blocks unknown clients is reached through a text reader whose output CalSnap parses; a page that refuses both is reported plainly so the text can be pasted instead. See section 7 |
+| Android share intent / iOS Share Extension (appearing in the system share sheet from any app, without installing the PWA) | **Requires native integration** — the plan is in [section 9](#9-platform-specific-sharing-what-still-needs-native-work) |
 
 CalSnap never claims that an event or a reminder has been saved. Only the calendar
 application you send the event to can create it.
@@ -39,6 +39,7 @@ CalSnap/
 ├── icon.png              # 512px app icon (also icon-192.png / icon-512.png)
 │
 ├── js/
+│   ├── urlfetch.js       # Step 10 - link -> page text + schema.org data (no DOM access)
 │   ├── extractor.js      # Step 4  - text -> event details      (no DOM access)
 │   ├── validation.js     # Step 5  - details -> errors/warnings (no DOM access)
 │   ├── calendar.js       # Steps 6-8 - Google Calendar URL + .ics generation
@@ -47,17 +48,21 @@ CalSnap/
 ├── tests/                # Node test suites (no dependencies, no browser needed)
 │   ├── load-globals.js   # Loads the browser scripts into Node
 │   ├── ics-reader.js     # Unfolds/parses a generated .ics the way a calendar app would
+│   ├── google-url-reader.js # Decodes a generated Google Calendar URL into event fields
 │   ├── extractor.test.js
 │   ├── validation.test.js
 │   ├── calendar.test.js
 │   ├── ui.test.js        # Drives js/ui.js against a small DOM stub
 │   ├── workflow.test.js  # Share -> extract -> validate -> Google/.ics, end to end
+│   ├── urlfetch.test.js  # Link reading: JSON-LD, Open Graph, reader output
 │   ├── browser-smoke.html   # Real-browser fixture: full workflow
-│   └── browser-share.html   # Real-browser fixture: share-target input
+│   ├── browser-share.html   # Real-browser fixture: share-target input
+│   └── browser-fields.html  # Real-browser fixture: reads back the filled form
 │
 ├── tools/
 │   ├── serve.js          # Zero-dependency local static server
 │   ├── browser-smoke.ps1 # Runs the fixtures through headless Chrome/Edge
+│   ├── check-url.js      # Reads a live URL and prints what CalSnap found
 │   ├── make-sample.js    # Writes tools/sample-event.ics from the sample event
 │   ├── validate-ics.py   # Independent RFC 5545 structural check of an .ics file
 │   └── make-icons.py     # Regenerates the PNG icons
@@ -69,7 +74,7 @@ CalSnap/
 
 **Why this split:** `extractor.js`, `validation.js` and `calendar.js` never touch the
 DOM, so the same logic can be reused by an Android share intent or an iOS Share
-Extension ([section 8](#8-platform-specific-sharing-what-still-needs-native-work)) and
+Extension ([section 9](#9-platform-specific-sharing-what-still-needs-native-work)) and
 can be unit-tested in Node. `ui.js` contains all the DOM code and no business rules.
 
 ---
@@ -297,7 +302,7 @@ Pages redeploys automatically on every push. Service-worker changes take effect 
 next visit: `sw.js` fetches code **network-first**, so a deployed change is never hidden
 behind a stale cache. The cache name in `sw.js` (`calsnap-3`) is versioned so old files
 are dropped as soon as the new worker activates, and the footer of the page shows the
-running version (`Version 1.0.3`) so a cached copy is recognisable at a glance.
+running version (`Version 1.1.0`) so a cached copy is recognisable at a glance.
 
 If a change does not appear after a reload:
 
@@ -398,7 +403,73 @@ The interface is mobile-first and adapts at 560 px and 900 px:
 
 ---
 
-## 7. How extraction behaves (and its limits)
+## 7. Reading a link (paste a URL instead of text)
+
+Paste an event **link** and choose **Extract Event Details**: CalSnap fetches the page and
+fills the form the same way it does for pasted text.
+
+```text
+https://in.bookmyshow.com/events/sharon-verma-live/ET00521481
+        |
+        v  title:    Sharon Verma Live
+           date:     2026-11-14        start: 19:00
+           location: Sophia Bhabha Auditorium, Mumbai
+```
+
+### How it works, and why it needs care
+
+A browser cannot read another origin's page: the response is blocked by CORS, and many
+event sites answer an unknown client with **403** (BookMyShow does). CalSnap has no
+server, so `js/urlfetch.js` tries three routes in order:
+
+| Route | What happens | What it is good for |
+| --- | --- | --- |
+| 1. direct | Your browser fetches the page itself | Pages that allow it; gives the real HTML with schema.org JSON-LD |
+| 2. reader | A text service returns the page's readable content | Pages that block browsers, such as BookMyShow |
+| 3. reader (text only) | The same service, plain text | Last resort, no structured data |
+
+Then `js/extractor.js` reads it, preferring what the **page itself declares** over anything
+guessed from a sentence:
+
+1. **schema.org Event JSON-LD** (`startDate`, `endDate`, `location`, `name`) — exact.
+2. **The page's fact block** — the lines next to the page's icons, e.g.
+   `Sat 14 Nov 2026 - Sat 9 Jan 2027`, `7:00 PM`, `Sophia Bhabha Auditorium: Mumbai`.
+3. **Open Graph tags** (`og:title`, `event:start_time`, `og:street-address`).
+4. **The visible text**, through the same extractor used for pasted text.
+
+Page-stated facts also outrank text heuristics, which matters: a page is full of dates that
+are not the event. On the BookMyShow page a banner image named
+`...-2026-10-8-t-17-14-58.jpg` supplied a wrong date until the page's own date took
+precedence. A date or title the **user** labelled by hand is never overridden.
+
+### What it cannot do
+
+* **Pages that refuse every route** are reported honestly — "the site blocks requests from a
+  browser that is not showing the page" — with the suggestion to paste the text instead.
+  CalSnap never pretends a page was read.
+* **A time the page does not state** stays empty. BookMyShow's listing shows a run of dates
+  and one show time; a page that shows neither leaves the field for the user.
+* **The link is sent to the reader service** on routes 2 and 3, so that service sees the URL
+  (not your calendar details, and nothing is stored). The interface says which route was
+  used each time.
+
+### Checking a link by hand
+
+```bash
+node tools/check-url.js https://in.bookmyshow.com/events/sharon-verma-live/ET00521481
+```
+
+It prints the route used, what the page declared, the details CalSnap would put in the form,
+and the Google Calendar link — so a wrong result can be diagnosed without the browser.
+
+The offline suite covers the parsing with saved markup, including a fixture of the reader
+output above, so a change that breaks link extraction fails `npm test`:
+
+```bash
+npm run test:url
+```
+
+## 8. How extraction behaves (and its limits)
 
 `js/extractor.js` finds the first plausible value for each field. It recognises:
 
@@ -444,7 +515,7 @@ Deliberate limitations:
 
 ---
 
-## 8. Platform-specific sharing: what still needs native work
+## 9. Platform-specific sharing: what still needs native work
 
 The web application already does what a website can do:
 
@@ -468,7 +539,7 @@ shell only has to deliver text — no logic needs to be rewritten.
 
 ---
 
-## 9. Known limitations
+## 10. Known limitations
 
 * Reminders inside an `.ics` file are a request, not a guarantee: some calendar
   applications ignore imported `VALARM` entries. Google Calendar cannot receive a
@@ -477,6 +548,6 @@ shell only has to deliver text — no logic needs to be rewritten.
   may need a manual correction — which is exactly what the review step is for.
 * CalSnap has no backend, so shared links are never fetched.
 
-## 10. Licence
+## 11. Licence
 
 MIT.

@@ -25,18 +25,24 @@
     </section>
     <div id="status" class="status hidden"></div>
 
+    <script src="http://127.0.0.1:5173/js/urlfetch.js"></script>
     <script src="http://127.0.0.1:5173/js/extractor.js"></script>
     <script src="http://127.0.0.1:5173/js/validation.js"></script>
     <script src="http://127.0.0.1:5173/js/calendar.js"></script>
     <script src="http://127.0.0.1:5173/js/ui.js"></script>
     <script>
-        // Give the shared-text path a moment, then read the form the app filled in.
+        // Reads back the form the application filled in, for a pasted or shared text.
+        //
+        // A link input is NOT covered here: it needs a real network round trip, and a
+        // virtual-time headless browser cannot await one. The link path is verified
+        // instead by tools/check-url.js (real retrieval, real result) and by
+        // tests/ui.test.js, which drives this same interface code with a supplied page.
         window.addEventListener('load', function () {
-            window.setTimeout(function () {
-                var params = new URLSearchParams(location.search);
-                document.getElementById('raw-text').value = params.get('text') || '';
-                document.getElementById('btn-extract').click();
+            var params = new URLSearchParams(location.search);
+            document.getElementById('raw-text').value = params.get('text') || '';
+            document.getElementById('btn-extract').click();
 
+            window.setTimeout(function () {
                 var read = function (id) { return document.getElementById(id).value; };
                 var out = {
                     title: read('event-title'),

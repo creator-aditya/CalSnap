@@ -18,6 +18,13 @@ const { Validation } = require('./load-globals.js');
 
 const ROOT = path.join(__dirname, '..');
 
+// Load the application modules once, exactly as index.html does, so the interface
+// resolves the same UrlFetch / Extractor / Validation / CalendarCore objects.
+require(path.join(ROOT, 'js', 'urlfetch.js'));
+require(path.join(ROOT, 'js', 'extractor.js'));
+require(path.join(ROOT, 'js', 'validation.js'));
+require(path.join(ROOT, 'js', 'calendar.js'));
+
 /* -------------------------------------------------------------------------- *
  * A deliberately small DOM stub
  * -------------------------------------------------------------------------- */
@@ -69,6 +76,9 @@ function createDom(search = '') {
         byId.set(id, new StubElement(tag, id));
     }
     byId.get('event-reminder').value = 'none';
+    // index.html labels the button; the stub needs the same starting text so the
+    // link-reading path can be checked for restoring it.
+    byId.get('btn-text').textContent = 'Extract Event Details';
 
     const body = new StubElement('body');
     const windowListeners = {};
@@ -130,9 +140,19 @@ function flush() {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** Waits until `check()` is true, or gives up after ~1s so a failure is explicit. */
+async function waitFor(check, timeoutMs = 1000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (check()) return true;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    return check();
+}
+
 /** Load js/extractor.js + validation.js + calendar.js + ui.js and boot the UI. */
 function bootUi(dom) {
-    const sources = ['js/extractor.js', 'js/validation.js', 'js/calendar.js', 'js/ui.js']
+    const sources = ['js/urlfetch.js', 'js/extractor.js', 'js/validation.js', 'js/calendar.js', 'js/ui.js']
         .map((file) => fs.readFileSync(path.join(ROOT, file), 'utf8'))
         .join('\n;\n');
 
@@ -233,7 +253,7 @@ test('interface: every local script and manifest asset exists', () => {
         assert.ok(fs.existsSync(path.join(ROOT, src)), 'missing script: ' + src);
     }
     // Load order matters: extractor and validation must exist before calendar/ui.
-    assert.deepEqual(scripts, ['js/extractor.js', 'js/validation.js', 'js/calendar.js', 'js/ui.js']);
+    assert.deepEqual(scripts, ['js/urlfetch.js', 'js/extractor.js', 'js/validation.js', 'js/calendar.js', 'js/ui.js']);
 
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
     for (const icon of manifest.icons) {
@@ -470,16 +490,85 @@ test('interface: shared content from the Share menu is prefilled and extracted',
     }
 });
 
-test('interface: a link-only share explains the limitation instead of faking success', () => {
+test('interface: a link-only input starts reading the page, inventing nothing', () => {
     const dom = createDom('?url=' + encodeURIComponent('https://example.com/events/spring-product-launch'));
     const runtime = bootUi(dom);
     try {
-        assert.match(dom.get('extraction-notice').textContent, /cannot read a webpage/i);
-        assert.equal(dom.get('extraction-notice').className.includes('warning'), true);
+        // The page is fetched, not guessed at: the interface says so, and no date or
+        // time appears from the link itself.
+        assert.match(dom.get('extraction-notice').textContent, /Fetching|Reading the page/i);
         assert.equal(dom.get('event-date').value, '', 'no date may be invented from a link');
         assert.equal(dom.get('event-start').value, '', 'no time may be invented from a link');
-        assert.match(dom.get('extraction-hint').textContent, /could not identify/i);
     } finally {
+        runtime.restore();
+    }
+});
+
+test('interface: a link-only input reads the page and fills the form from it', async () => {
+    const dom = createDom();
+    const runtime = bootUi(dom);
+    // The stub is installed after bootUi: booting re-runs js/urlfetch.js, which
+    // replaces globalThis.UrlFetch with a fresh object.
+    const realLoad = globalThis.UrlFetch.load;
+    globalThis.UrlFetch.load = () => Promise.resolve({
+        ok: true,
+        route: 'direct',
+        page: {
+            title: 'Sharon Verma Live',
+            startDate: '2026-11-14T19:30:00+05:30',
+            endDate: '2026-11-14T21:00:00+05:30',
+            location: 'The Comedy Club, Mumbai',
+            description: 'A brand new hour of stand up.',
+            text: 'Sharon Verma Live\nThe Comedy Club, Mumbai',
+            source: 'json-ld'
+        }
+    });
+
+    try {
+        dom.get('raw-text').value = 'https://in.bookmyshow.com/events/sharon-verma-live/ET00521481';
+        dom.get('btn-extract').dispatch('click');
+        await waitFor(() => dom.get('event-date').value !== '');
+
+        // The link produced the same filled form as pasted text would.
+        assert.equal(dom.get('event-title').value, 'Sharon Verma Live');
+        assert.equal(dom.get('event-date').value, '2026-11-14');
+        assert.equal(dom.get('event-start').value, '19:30');
+        assert.equal(dom.get('event-end').value, '21:00');
+        assert.equal(dom.get('event-location').value, 'The Comedy Club, Mumbai');
+        assert.equal(dom.get('review-section').classList.contains('hidden'), false);
+        assert.match(dom.get('extraction-notice').textContent, /read from the page/i);
+        assert.match(dom.get('extraction-notice').textContent, /your browser/i);
+        assert.equal(dom.get('extraction-hint').textContent, '', 'a complete page leaves nothing to ask for');
+    } finally {
+        globalThis.UrlFetch.load = realLoad;
+        runtime.restore();
+    }
+});
+
+test('interface: a link whose page cannot be read says so plainly', async () => {
+    const dom = createDom();
+    const runtime = bootUi(dom);
+    const realLoad = globalThis.UrlFetch.load;
+    globalThis.UrlFetch.load = () => Promise.resolve({
+        ok: false,
+        route: '',
+        reason: 'The page could not be read: the site blocks requests from a browser that is not showing the page, ' +
+            'and CalSnap has no server to fetch it for you.'
+    });
+
+    try {
+        dom.get('raw-text').value = 'https://in.bookmyshow.com/events/sharon-verma-live/ET00521481';
+        dom.get('btn-extract').dispatch('click');
+        await waitFor(() => /could not be read/i.test(dom.get('extraction-notice').textContent));
+
+        const notice = dom.get('extraction-notice');
+        assert.match(notice.textContent, /could not be read/i);
+        assert.match(notice.textContent, /blocks requests/i);
+        assert.equal(notice.className.includes('warning'), true, 'a warning, not an error');
+        assert.equal(dom.get('event-date').value, '', 'no date may be invented from a link');
+        assert.equal(dom.get('btn-text').textContent, 'Extract Event Details', 'the button returns to normal');
+    } finally {
+        globalThis.UrlFetch.load = realLoad;
         runtime.restore();
     }
 });
@@ -492,8 +581,7 @@ test('interface: a link in otherwise usable text is noted, not treated as a fail
         dom.get('btn-extract').dispatch('click');
 
         assert.equal(dom.get('event-date').value, '2026-05-01');
-        assert.equal(dom.get('extraction-notice').className.includes('info'), true);
-        assert.match(dom.get('extraction-notice').textContent, /does not open web pages/i);
+        assert.equal(dom.get('event-location').value, 'Hall B');
         assert.equal(dom.get('extraction-notice').className.includes('error'), false);
     } finally {
         runtime.restore();
