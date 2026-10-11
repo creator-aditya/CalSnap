@@ -120,10 +120,19 @@ test('paragraph: the description carries the full text the user pasted', () => {
     assert.ok(event.description.length > 300, 'the description is not truncated');
 });
 
-test('paragraph: the timezone is sent so Google shows local time, not UTC', () => {
+test('paragraph: the Google times decode back to the times written in the paragraph', () => {
     const { event } = googleEventFor(SUMMIT_PARAGRAPH);
-    assert.ok(event.timeZone.length > 0, 'a timezone must accompany the UTC instants');
-    assert.notEqual(event.timeZone, 'UTC', 'this machine is not on UTC, so it must not claim to be');
+
+    // "from 09:00 AM to 05:00 PM" in the text must arrive as 09:00-17:00 in the
+    // prefilled page. A missing Z on the UTC stamp made Google show 03:30-11:30 for a
+    // user on UTC+05:30, so this is asserted through the decoded event, not the raw URL.
+    assert.equal(event.startTime, '09:00');
+    assert.equal(event.endTime, '17:00');
+
+    const raw = new URL(CalendarCore.generateGoogleUrl(
+        Validation.validate(Extractor.extract(SUMMIT_PARAGRAPH, { now: NOW }), { now: NOW }).event
+    )).searchParams.get('dates');
+    assert.match(raw, /Z\//, 'both stamps must carry the UTC marker');
 });
 
 test('paragraph: the same details survive into the .ics file', () => {

@@ -17,7 +17,7 @@
      * browser is running a cached copy of the code - see the README section on
      * updating a deployed copy.
      */
-    var APP_VERSION = '1.0.2';
+    var APP_VERSION = '1.0.3';
 
     var SHARED_PARAM_NAMES = ['text', 'title', 'url', 'share', 'description'];
     var TEXT_FIELDS = ['title', 'date', 'start', 'end', 'location', 'description'];

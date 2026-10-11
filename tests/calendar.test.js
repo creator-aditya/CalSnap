@@ -43,34 +43,62 @@ test('google: URL contains title, UTC start/end, location and details', () => {
     assert.equal(params.get('location'), 'Studio 2');
     assert.equal(params.get('details'), 'Bring wireframes');
 
-    // Google expects the UTC form without the trailing Z, plus the device timezone.
+    // The UTC form WITH the trailing Z. Without it Google reads the UTC digits as
+    // wall-clock time in the device zone, which shifted a 15:00 event to 09:30 for a
+    // user on UTC+05:30.
     const [start, end] = params.get('dates').split('/');
-    assert.equal(start, ics.localToStamp('2026-05-01', '15:30').replace(/Z$/, ''));
-    assert.equal(end, ics.localToStamp('2026-05-01', '17:00').replace(/Z$/, ''));
-    assert.match(params.get('dates'), /^\d{8}T\d{6}\/\d{8}T\d{6}$/);
-    assert.ok(params.get('ctz'), 'the device timezone is sent so Google shows the intended local time');
+    assert.equal(start, ics.localToStamp('2026-05-01', '15:30'));
+    assert.equal(end, ics.localToStamp('2026-05-01', '17:00'));
+    assert.match(params.get('dates'), /^\d{8}T\d{6}Z\/\d{8}T\d{6}Z$/);
+    assert.equal(params.has('ctz'), false, 'ctz is ignored for action=TEMPLATE and must not be sent');
+});
+
+test('google: the decoded times equal the reviewed local times', () => {
+    // The assertion that would have caught the missing Z: the URL is read back the way
+    // Google Calendar reads it, so the result must be the time the user chose.
+    const { readGoogleUrl } = require('./google-url-reader.js');
+    const event = readGoogleUrl(CalendarCore.generateGoogleUrl(baseEvent));
+    assert.deepEqual(event.summary(), {
+        title: 'Design Review',
+        date: '2026-05-01',
+        startTime: '15:30',
+        endTime: '17:00',
+        location: 'Studio 2'
+    });
+});
+
+test('google: the reminder is requested, and never invented when none is chosen', () => {
+    const withReminder = new URL(CalendarCore.generateGoogleUrl(withEvent({ reminder: '60' }))).searchParams;
+    assert.equal(withReminder.get('rem'), 'popup:60');
+
+    const without = new URL(CalendarCore.generateGoogleUrl(withEvent({ reminder: 'none' }))).searchParams;
+    assert.equal(without.has('rem'), false, 'no reminder chosen means no rem parameter');
 });
 
 test('google: date and time survive the round trip in this timezone', () => {
-    const params = new URL(CalendarCore.generateGoogleUrl(baseEvent)).searchParams;
-    const [start] = params.get('dates').split('/');
+    // The stamp is UTC with the Z, and the assertion below converts it back to local
+    // time using the same rule Google applies. A missing Z made this test pass while
+    // the real page showed 09:30 for a 15:00 event, so the Z is asserted explicitly.
+    const start = new URL(CalendarCore.generateGoogleUrl(baseEvent)).searchParams.get('dates').split('/')[0];
+    assert.match(start, /^\d{8}T\d{6}Z$/, 'the stamp must be UTC and end with Z');
+
     const iso = start.replace(
-        /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/,
+        /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/,
         '$1-$2-$3T$4:$5:$6Z'
     );
     const local = new Date(iso);
     assert.equal(local.getFullYear(), 2026);
     assert.equal(local.getMonth(), 4); // May
     assert.equal(local.getDate(), 1);
-    assert.equal(local.getHours(), 15);
+    assert.equal(local.getHours(), 15, 'the decoded local start must be the reviewed 15:30');
     assert.equal(local.getMinutes(), 30);
 });
 
 test('google: a missing end time becomes start + 1 hour, not a zero-length event', () => {
     const params = new URL(CalendarCore.generateGoogleUrl(withEvent({ endTime: '' }))).searchParams;
     const [start, end] = params.get('dates').split('/');
-    assert.equal(start, ics.localToStamp('2026-05-01', '15:30').replace(/Z$/, ''));
-    assert.equal(end, ics.localToStamp('2026-05-01', '16:30').replace(/Z$/, ''));
+    assert.equal(start, ics.localToStamp('2026-05-01', '15:30'));
+    assert.equal(end, ics.localToStamp('2026-05-01', '16:30'));
 });
 
 test('google: no URL is produced for an unusable event', () => {
@@ -246,7 +274,7 @@ test('share: text carries the details and claims nothing was saved', () => {
 });
 
 test('share: the reminder notice never promises a notification', () => {
-    assert.match(CalendarCore.GOOGLE_REMINDER_NOTICE, /does not accept a reminder from a link/i);
+    assert.match(CalendarCore.GOOGLE_REMINDER_NOTICE, /is asked to set this reminder/i);
     assert.match(CalendarCore.GOOGLE_REMINDER_NOTICE, /does not save the event/i);
     assert.match(CalendarCore.ICS_REMINDER_NOTICE, /ignore imported reminders/i);
 });

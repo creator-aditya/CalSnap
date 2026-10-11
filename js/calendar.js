@@ -41,8 +41,9 @@
         REMINDER_LABELS: REMINDER_LABELS,
 
         /** Message shown next to the Google Calendar button. */
-        GOOGLE_REMINDER_NOTICE: 'Google Calendar does not accept a reminder from a link: set the ' +
-            'notification again on the Google Calendar page. Opening that page does not save the event.',
+        GOOGLE_REMINDER_NOTICE: 'Google Calendar is asked to set this reminder, but it may use the ' +
+            'calendar default instead - check the notification on the Google Calendar page before saving. ' +
+            'Opening that page does not save the event.',
 
         /** Message shown next to the .ics button. */
         ICS_REMINDER_NOTICE: 'The reminder is written into the .ics file as a VALARM. Some calendar ' +
@@ -155,6 +156,12 @@
         /**
          * Prefilled Google Calendar creation page. Opening it does not create or
          * save anything - the user still reviews and saves inside Google Calendar.
+         *
+         * The `dates` parameter must be UTC in the form YYYYMMDDTHHMMSSZ. The trailing
+         * Z is NOT optional: without it Google reads the UTC digits as wall-clock time
+         * in the device's zone, which shifted a 15:00 event to 09:30 for a user in
+         * Asia/Calcutta (UTC+05:30). `ctz` is not honoured by `action=TEMPLATE` and is
+         * therefore not sent.
          */
         generateGoogleUrl: function (event) {
             var window_ = this.resolveWindow(event);
@@ -163,10 +170,16 @@
             var params = new URLSearchParams();
             params.set('action', 'TEMPLATE');
             params.set('text', String(event.title || ''));
-            params.set('dates', window_.startStamp.replace(/Z$/, '') + '/' + window_.endStamp.replace(/Z$/, ''));
-            params.set('ctz', this.localTimeZone());
+            params.set('dates', window_.startStamp + '/' + window_.endStamp);
             if (event.location) params.set('location', String(event.location));
             if (event.description) params.set('details', String(event.description));
+
+            // Ask Google for the chosen reminder. This is best effort: Google may still
+            // apply the calendar default, which is why the interface says to check it.
+            var minutes = parseInt(event.reminder, 10);
+            if (minutes > 0 && this.REMINDER_LABELS[String(minutes)]) {
+                params.set('rem', 'popup:' + minutes);
+            }
 
             return GOOGLE_ENDPOINT + '?' + params.toString();
         },

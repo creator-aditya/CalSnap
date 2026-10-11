@@ -98,6 +98,24 @@
             results.googleUrl = opened[0] || null;
             results.googleStatus = document.getElementById('status').textContent.slice(0, 120);
 
+            // 3b. Read the `dates` parameter of the link the page produced. It must be
+            // UTC ending in Z, and must convert back to the local times in the form.
+            // This is the check that catches a Google Calendar link showing the wrong
+            // time for users outside UTC.
+            if (opened[0]) {
+                var dates = new URL(opened[0]).searchParams.get('dates') || '';
+                results.googleDates = dates;
+                results.googleDatesEndWithZ = /^\d{8}T\d{6}Z\/\d{8}T\d{6}Z$/.test(dates);
+                var stamp = dates.split('/')[0];
+                var decoded = new Date(stamp.replace(
+                    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/,
+                    '$1-$2-$3T$4:$5:$6Z'
+                ));
+                var two = function (n) { return (n < 10 ? '0' : '') + n; };
+                results.googleDecodedStart = two(decoded.getHours()) + ':' + two(decoded.getMinutes());
+                results.googleReminder = new URL(opened[0]).searchParams.get('rem');
+            }
+
             // 4. .ics document for the same event.
             var validated = Validation.validate({
                 title: document.getElementById('event-title').value,

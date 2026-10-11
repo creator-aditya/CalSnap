@@ -387,7 +387,7 @@ test('interface: the reminder is transferred to .ics but not promised for Google
         dom.get('event-reminder').value = '15';
 
         dom.get('btn-google').dispatch('click');
-        assert.match(dom.get('status').textContent, /does not accept a reminder from a link/i);
+        assert.match(dom.get('status').textContent, /is asked to set this reminder/i);
 
         dom.get('btn-ics').dispatch('click');
         assert.match(runtime.blobs[runtime.blobs.length - 1], /TRIGGER:-PT15M/);

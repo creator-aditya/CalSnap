@@ -293,9 +293,17 @@ git commit -m "Describe the change"
 git push
 ```
 
-Pages redeploys automatically on every push. A visitor may need one reload to pick up
-the new service worker cache; the cache name in `sw.js` (`calsnap-v2`) is versioned so
-old files are dropped as soon as it activates.
+Pages redeploys automatically on every push. Service-worker changes take effect on the
+next visit: `sw.js` fetches code **network-first**, so a deployed change is never hidden
+behind a stale cache. The cache name in `sw.js` (`calsnap-3`) is versioned so old files
+are dropped as soon as the new worker activates, and the footer of the page shows the
+running version (`Version 1.0.3`) so a cached copy is recognisable at a glance.
+
+If a change does not appear after a reload:
+
+1. Hard-reload with `Ctrl+Shift+R` (`Cmd+Shift+R` on macOS).
+2. Still stale? Open DevTools → **Application → Service Workers → Unregister**, then reload.
+3. Check the version in the footer matches the commit you just pushed.
 
 ### Option B — Netlify Drop (no Git at all)
 

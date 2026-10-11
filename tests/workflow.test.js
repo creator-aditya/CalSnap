@@ -68,8 +68,9 @@ test('end to end: the reviewed event produces a correct Google Calendar link', (
     assert.match(params.get('details'), /Join 300 designers/);
 
     const [start, end] = params.get('dates').split('/');
-    assert.equal(start, ics.localToStamp('2026-03-14', '09:30').replace(/Z$/, ''));
-    assert.equal(end, ics.localToStamp('2026-03-14', '16:00').replace(/Z$/, ''));
+    // UTC with the Z, which is what makes Google show the reviewed local times.
+    assert.equal(start, ics.localToStamp('2026-03-14', '09:30'));
+    assert.equal(end, ics.localToStamp('2026-03-14', '16:00'));
 });
 
 test('end to end: the reviewed event produces a correct .ics file', () => {

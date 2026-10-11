@@ -13,9 +13,13 @@
  */
 'use strict';
 
-/** "20260501T133000" -> local {date: '2026-05-01', time: '15:30'} */
+/** "20260501T133000Z" (or without the Z) -> local {date: '2026-05-01', time: '15:30'} */
 function decodeStamp(stamp) {
-    const match = String(stamp).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
+    // Google Calendar's `dates` parameter is documented as UTC and is read here as such:
+    // the digits are UTC and are converted to the local zone, which is exactly what
+    // Google does when it renders the prefilled page. A missing Z is still accepted so
+    // the reader can also inspect older links, but generateGoogleUrl always writes it.
+    const match = String(stamp).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/);
     if (!match) return null;
 
     const utc = new Date(Date.UTC(
