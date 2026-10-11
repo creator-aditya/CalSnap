@@ -7,10 +7,5 @@
 *.png binary
 *.ico binary
 
-# Windows scripts keep CRLF so they run without complaint from older shells.
-*.ps1 text eol=crlf
-*.cmd text eol=crlf
-*.bat text eol=crlf
-
-# Generated or local-only files, if one ever slips past .gitignore.
-*.ics linguist-generated=false
+# Generated sample output; keep it readable in diffs.
+*.ics text eol=lf

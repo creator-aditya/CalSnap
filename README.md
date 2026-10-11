@@ -206,7 +206,7 @@ What is covered, mapped to the requirements:
 | `.ics` files contain the right event details | `calendar.test.js` → *ics: …* (read back with `tests/ics-reader.js`) |
 | Reminder included in the `.ics` file | `calendar.test.js` → *ics: each reminder option …* |
 | Browser sharing | `ui.test.js` → *sharing uses the web share sheet / falls back to the clipboard* |
-| Mobile and desktop interface | `ui.test.js` asset checks + responsive CSS; verify visually as in section 6 |
+| Mobile and desktop interface | `ui.test.js` asset checks + responsive CSS; verify visually as in section 6 (with the automated browser check and the device-width list) |
 | No false claim that something was saved | `workflow.test.js` → *nothing in the pipeline claims an event was already saved* |
 
 Every `.ics` assertion above reads the generated file back through
@@ -219,53 +219,121 @@ generator, for the cases where both sides could share the same misunderstanding.
 
 ## 5. Deploying for free
 
-The application is static files, so any free static host works. Two options:
+The application is static files, so any free static host works. Nothing needs to be
+built, and there is no server-side code to configure.
 
-### Option A — GitHub Pages
+All asset paths are **relative**, so the app works both at a domain root and under a
+sub-path such as `https://<user>.github.io/<repo>/`. That is verified, not assumed: see
+[section 6](#6-verifying-the-deployment).
+
+### Option A — GitHub Pages (step by step)
+
+The repository is already initialised and committed, so only these steps remain.
+
+**1. Create an empty repository on GitHub**
+
+Go to <https://github.com/new>:
+
+* **Repository name:** `calsnap` (or anything you like — it becomes part of the URL)
+* **Visibility:** Public *(Pages is free for public repositories)*
+* Do **not** add a README, `.gitignore` or licence — the folder already has them.
+
+**2. Push this folder to it**
 
 ```bash
-cd CalSnap
-git init
-git add .
-git commit -m "CalSnap"
-git branch -M main
-git remote add origin https://github.com/<your-user>/<your-repo>.git
+cd D:\CalSnap
+git remote add origin https://github.com/<your-user>/calsnap.git
 git push -u origin main
 ```
 
-Then, on GitHub: **Settings → Pages → Source: Deploy from a branch → Branch: `main`,
-folder: `/ (root)` → Save**. The app appears at
-`https://<your-user>.github.io/<your-repo>/` after a minute or two.
+Git will ask you to sign in the first time. If it opens a browser window, approve it;
+otherwise use a [personal access token](https://github.com/settings/tokens) as the
+password.
 
-All paths in the project are relative, so it works from a sub-path like that one.
+**3. Turn Pages on**
 
-### Option B — Netlify or Cloudflare Pages
+In the repository: **Settings → Pages → Source: Deploy from a branch → Branch: `main`,
+folder: `/ (root)` → Save**.
 
-* Netlify: drag the whole CalSnap folder onto <https://app.netlify.com/drop>, or
-  connect the Git repository with **build command** empty and **publish directory** `.`.
-* Cloudflare Pages: connect the repository, leave the build command empty and set the
-  output directory to `/`.
+**4. Open the URL**
 
-Both give a public HTTPS URL, which is required for the service worker, the share
-target and the Web Share API.
+After a minute or two the app is live at:
+
+```
+https://<your-user>.github.io/calsnap/
+```
+
+**5. Updating it later**
+
+```bash
+git add -A
+git commit -m "Describe the change"
+git push
+```
+
+Pages redeploys automatically on every push. A visitor may need one reload to pick up
+the new service worker cache; the cache name in `sw.js` (`calsnap-v2`) is versioned so
+old files are dropped as soon as it activates.
+
+### Option B — Netlify Drop (no Git at all)
+
+1. Go to <https://app.netlify.com/drop>.
+2. Drag the **`CalSnap` folder** onto the page.
+3. Netlify returns a public HTTPS URL immediately.
+
+Leave the build command empty and the publish directory at the root — there is nothing
+to compile. Cloudflare Pages works the same way if you prefer it.
 
 ### Deployment checklist
 
-- [ ] Open the public URL on a phone and a desktop browser.
-- [ ] Paste text, extract, and check every field is editable.
-- [ ] Generate a Google Calendar link and confirm the event appears prefilled.
-- [ ] Download the `.ics` file and import it into a calendar application.
-- [ ] Confirm the imported event kept the reminder (some applications drop it).
-- [ ] On Android Chrome or iOS Safari, use **Share event details**.
-- [ ] On Android Chrome, install the app (⋮ → *Add to Home screen*) and check that
-      CalSnap now appears as a share target.
+Run through this on the deployed URL:
+
+- [ ] Open the public URL on a phone **and** a desktop browser.
+- [ ] Paste event text, choose **Extract Event Details**, and confirm every field is
+      editable.
+- [ ] Choose **Open Google Calendar** and confirm the event appears prefilled with the
+      right title, date, time and location.
+- [ ] Choose **Download .ics file** and import it into a calendar application.
+- [ ] Confirm the imported event kept the reminder *(some applications drop it)*.
+- [ ] On Android Chrome or iOS Safari, use **Share event details** to check the native
+      share sheet appears.
+- [ ] On Android Chrome, install the app (⋮ → *Add to Home screen*), then share a web
+      page from another app and confirm CalSnap is offered as a target.
+- [ ] Reload once and confirm the app still works with the network disabled (offline
+      shell).
+
+### Why HTTPS matters
+
+The features that need a secure origin — the service worker (offline support), the PWA
+install prompt, the `share_target` and the Web Share API — only work on `https://` or on
+`localhost`. `http://` on a LAN IP and `file://` will show the interface but silently
+lose those features. Both hosting options above give HTTPS automatically.
 
 ---
 
-## 6. Verifying the responsive interface by hand
+## 6. Verifying the deployment
 
-There is also an automated browser check that drives the real DOM in headless Chrome
-or Edge (start the app first):
+Because GitHub Pages project sites serve the app from a sub-path
+(`https://<user>.github.io/<repo>/`), the failure to watch for is an asset referenced as
+`/style.css` instead of `style.css` — it would 404 on the deployed site while working
+perfectly on localhost.
+
+That exact case is checked by serving the folder at a sub-path and loading it in a real
+browser:
+
+```bash
+npm start
+# in a second terminal, point the smoke suite at a sub-path:
+powershell -NoProfile -File tools/browser-smoke.ps1 -BaseUrl http://127.0.0.1:5173/calsnap
+```
+
+To reproduce the GitHub Pages layout locally, create a folder containing the project as
+a sub-folder and serve that folder — every page, stylesheet, script, icon, the manifest
+and the service worker must all answer `200`.
+
+### Automated browser check
+
+Start the app first, then:
 
 ```bash
 npm start
@@ -285,7 +353,9 @@ details), and a messy real-world message. Sample output:
 "location": "The Old Mill, Riverside"
 ```
 
-For the layout itself, the interface is mobile-first and adapts at 560 px and 900 px:
+### Checking the responsive layout
+
+The interface is mobile-first and adapts at 560 px and 900 px:
 
 1. Open the deployed URL in a desktop browser.
 2. Open the developer tools and switch on the device toolbar.
